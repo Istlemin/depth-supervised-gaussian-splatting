@@ -12,6 +12,7 @@
 import os
 import torch
 from random import randint
+from depth_images import calibrate_depth
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
 import sys
@@ -33,6 +34,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
+    calibrate_depth(scene)
+    
     gaussians.training_setup(opt)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
@@ -89,8 +92,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+        
+        gt_depth = viewpoint_cam.depth.cuda()
+        Ll1_2 = l1_loss(render_pkg["render_depth"] * (gt_depth>0), gt_depth)*1
+        #loss = Ll1_2
+        loss = (1.0 - opt.lambda_dssim) * (Ll1+Ll1_2) + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
         loss.backward()
+
+        #print(f"{Ll1.item():.5f} {Ll1_2.item():.5f} {gaussians.depth_scale.item():.5f}")
 
         iter_end.record()
 
@@ -99,6 +108,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             if iteration % 10 == 0:
                 progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
+                progress_bar.set_postfix({"Gaussians": f"{len(gaussians.get_xyz)}"})
                 progress_bar.update(10)
             if iteration == opt.iterations:
                 progress_bar.close()

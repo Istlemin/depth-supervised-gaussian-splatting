@@ -12,12 +12,13 @@
 import torch
 import math
 import numpy as np
-from typing import NamedTuple
+from typing import List, NamedTuple
 
 class BasicPointCloud(NamedTuple):
     points : np.array
     colors : np.array
     normals : np.array
+    visible_in_cameras: List[List[int]]
 
 def geom_transform_points(points, transf_matrix):
     P, _ = points.shape

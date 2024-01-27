@@ -9,10 +9,12 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+import torch
 from scene.cameras import Camera
 import numpy as np
 from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal
+from PIL import Image
 
 WARNED = False
 
@@ -38,6 +40,13 @@ def loadCam(args, id, cam_info, resolution_scale):
         scale = float(global_down) * float(resolution_scale)
         resolution = (int(orig_w / scale), int(orig_h / scale))
 
+
+    depth = torch.tensor(np.array(cam_info.depth)).float()/1000.0
+    
+    resized_depth = torch.nn.functional.interpolate(depth.unsqueeze(0).unsqueeze(0), (resolution[1],resolution[0]), mode='nearest').squeeze(0)
+
+    gt_depth = resized_depth[:1, ...].float()
+    
     resized_image_rgb = PILtoTorch(cam_info.image, resolution)
 
     gt_image = resized_image_rgb[:3, ...]
@@ -48,7 +57,7 @@ def loadCam(args, id, cam_info, resolution_scale):
 
     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
-                  image=gt_image, gt_alpha_mask=loaded_mask,
+                  image=gt_image,depth=gt_depth, gt_alpha_mask=loaded_mask,
                   image_name=cam_info.image_name, uid=id, data_device=args.data_device)
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):
