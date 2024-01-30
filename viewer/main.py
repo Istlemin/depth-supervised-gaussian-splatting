@@ -122,8 +122,8 @@ def handle_keys(delta_t):
 def update_model_path(path):
     global g_model_path, cameras, g_all_iterations
     g_model_path = path
-    g_all_iterations = sorted(glob.glob(path+"/point_cloud/iteration_*"),key=lambda x:int(x.split("_")[-1]))
-    g_all_iterations = [Path(x).parts[-1] for x in g_all_iterations]
+    g_all_iterations = sorted(glob.glob(path+"/point_cloud/iteration_*/point_cloud.ply"),key=lambda x:int(x.split("_")[-2].split("\\")[0].split("/")[0]))
+    g_all_iterations = [Path(x).parts[-2] for x in g_all_iterations]
     cameras = json.load(open(path+"/cameras.json","r"))
     return update_iteration(len(g_all_iterations)-1)
 
@@ -274,7 +274,7 @@ def main():
                 
                 # cameras
                 if len(cameras)>0:
-                    changed, g_chosen_camera = imgui.combo("camera", g_chosen_camera, [str(cam["id"]) for cam in cameras])
+                    changed, g_chosen_camera = imgui.combo("camera", g_chosen_camera, [str(cam["id"]) + " " + cam["split"] for cam in cameras])
                     if changed:
                         g_camera.set_camera_view(cameras[g_chosen_camera])
                 
