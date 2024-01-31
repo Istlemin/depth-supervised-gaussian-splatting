@@ -9,3 +9,5 @@ screenshots
 
 train_logs/*
 *.ply
+
+*.json
