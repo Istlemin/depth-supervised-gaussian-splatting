@@ -108,13 +108,13 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, depth_folde
     sys.stdout.write('\n')
     return cam_infos
 
-def fetchPly(path, visible_in_cameras, camera_ids=None):
+def fetchPly(path, visible_in_cameras, camera_ids=None, min_visibility=0):
     
     plydata = PlyData.read(path)
     vertices = plydata['vertex']
     
     if camera_ids is not None:
-        mask = [1<len(set(camera_ids) & set(visible_in_cameras[i])) for i in range(len(vertices))]
+        mask = [min_visibility <= len(set(camera_ids) & set(visible_in_cameras[i])) for i in range(len(vertices))]
         
     positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
     colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
@@ -138,7 +138,7 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfo(path, images, eval, num_train_images=1):
+def readColmapSceneInfo(path, images, eval, num_train_images=1, min_visibility=0):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -178,7 +178,7 @@ def readColmapSceneInfo(path, images, eval, num_train_images=1):
         storePly(ply_path, xyz, rgb)
     # try:
     
-    pcd = fetchPly(ply_path,visible_in_cameras, [x.uid for x in train_cam_infos])
+    pcd = fetchPly(ply_path,visible_in_cameras, [x.uid for x in train_cam_infos], min_visibility)
     # except:
     #     pcd = None
 

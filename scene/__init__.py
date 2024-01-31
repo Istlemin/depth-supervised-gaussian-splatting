@@ -12,6 +12,7 @@
 import os
 import random
 import json
+from re import split
 from utils.graphics_utils import BasicPointCloud
 from utils.system_utils import searchForMaxIteration
 from scene.dataset_readers import sceneLoadTypeCallbacks
@@ -42,7 +43,7 @@ class Scene:
         self.test_cameras = {}
 
         if os.path.exists(os.path.join(args.source_path, "sparse")):
-            scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, args.num_train_images)
+            scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, args.num_train_images, args.min_visibility)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval)
@@ -53,13 +54,16 @@ class Scene:
             with open(scene_info.ply_path, 'rb') as src_file, open(os.path.join(self.model_path, "input.ply") , 'wb') as dest_file:
                 dest_file.write(src_file.read())
             json_cams = []
-            camlist = []
+            idx = 0
             if scene_info.test_cameras:
-                camlist.extend(scene_info.test_cameras)
+                for cam in scene_info.test_cameras:
+                    json_cams.append(camera_to_JSON(idx, cam, "test"))
+                    idx += 1
+                    
             if scene_info.train_cameras:
-                camlist.extend(scene_info.train_cameras)
-            for id, cam in enumerate(camlist):
-                json_cams.append(camera_to_JSON(id, cam))
+                for cam in scene_info.train_cameras:
+                    json_cams.append(camera_to_JSON(idx, cam,"train"))
+                    idx += 1
             with open(os.path.join(self.model_path, "cameras.json"), 'w') as file:
                 json.dump(json_cams, file)
 
@@ -72,8 +76,14 @@ class Scene:
         for resolution_scale in resolution_scales:
             print("Loading Training Cameras")
             self.train_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.train_cameras, resolution_scale, args)
+            for cam in self.train_cameras[resolution_scale]:
+                cam.split = "train"
+                
             print("Loading Test Cameras")
             self.test_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.test_cameras, resolution_scale, args)
+            for cam in self.test_cameras[resolution_scale]:
+                cam.split = "test"
+            
 
         if self.loaded_iter:
             self.gaussians.load_ply(os.path.join(self.model_path,
@@ -81,14 +91,15 @@ class Scene:
                                                            "iteration_" + str(self.loaded_iter),
                                                            "point_cloud.ply"))
         else:
-            # import numpy as np
-            # positions = np.random.uniform(-1,1,scene_info.point_cloud.points.shape)*20
-            # colors = np.random.uniform(0,1,scene_info.point_cloud.colors.shape)
-            # normals = np.random.uniform(-1,1,scene_info.point_cloud.normals.shape)
-            # pcd = BasicPointCloud(points=positions, colors=colors, normals=normals, visible_in_cameras=None)
-            # self.gaussians.create_from_pcd(pcd, self.cameras_extent)
-            
-            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
+            if args.random_initialisation:
+                import numpy as np
+                positions = np.random.uniform(-1,1,(10000,3))*20
+                colors = np.random.uniform(0,1,(10000,3))
+                normals = np.random.uniform(-1,1,(10000,3))
+                pcd = BasicPointCloud(points=positions, colors=colors, normals=normals, visible_in_cameras=None)
+                self.gaussians.create_from_pcd(pcd, self.cameras_extent)
+            else:
+                self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
         
         self.point_cloud = scene_info.point_cloud
 
