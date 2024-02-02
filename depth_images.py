@@ -32,6 +32,9 @@ def calibrate_depth(scene):
     alpha,beta = np.polyfit(all_image_depths,all_colmap_depths, 1)
     print(alpha,beta)
     
+    beta = 0
+    alpha = 2.6
+    
     for train_camera in scene.getTrainCameras():
         train_camera.depth[train_camera.depth!=0] = train_camera.depth[train_camera.depth!=0]*alpha+beta
     

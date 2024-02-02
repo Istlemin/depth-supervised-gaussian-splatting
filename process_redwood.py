@@ -3,6 +3,7 @@ from glob import glob
 import os
 import shutil
 import numpy as np
+from PIL import Image
 
 def process_scene(image_folder:Path, max_num_images=200):
     name = image_folder.parts[-1]
@@ -31,7 +32,7 @@ def process_scene(image_folder:Path, max_num_images=200):
         
         depth_image = image_folder/"depth"/ depth_images_names[closest_depth_idx]
 
-        shutil.copy2(rgb_image, new_image_dir/f"{image_idx}.jpg")
+        Image.open(rgb_image).save(new_image_dir/f"{image_idx}.png")
         shutil.copy2(depth_image, new_depth_dir/f"{image_idx}.png")
         
         image_idx += 1
