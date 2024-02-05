@@ -95,7 +95,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         Ll1 = l1_loss(image, gt_image)
         
         gt_depth = viewpoint_cam.depth.cuda()
-        Ll1_depth = l1_loss(render_pkg["render_depth"], gt_depth)
+        Ll1_depth = l1_loss(render_pkg["render_depth"]*(gt_depth>0), gt_depth)
         
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
 
