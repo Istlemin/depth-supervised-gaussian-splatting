@@ -15,7 +15,7 @@ import json
 from re import split
 from utils.graphics_utils import BasicPointCloud
 from utils.system_utils import searchForMaxIteration
-from scene.dataset_readers import sceneLoadTypeCallbacks
+from scene.dataset_readers import sceneLoadTypeCallbacks, fetchPly
 from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
@@ -91,15 +91,20 @@ class Scene:
                                                            "iteration_" + str(self.loaded_iter),
                                                            "point_cloud.ply"))
         else:
-            if args.random_initialisation:
+            if args.initialisation == "random":
                 import numpy as np
                 positions = np.random.uniform(-1,1,(10000,3))*20
                 colors = np.random.uniform(0,1,(10000,3))
                 normals = np.random.uniform(-1,1,(10000,3))
                 pcd = BasicPointCloud(points=positions, colors=colors, normals=normals, visible_in_cameras=None)
                 self.gaussians.create_from_pcd(pcd, self.cameras_extent)
-            else:
+            elif args.initialisation == "colmap":
                 self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
+            elif args.initialisation == "depth":
+                depth_pcd = fetchPly("test.ply")
+                self.gaussians.create_from_pcd(depth_pcd, self.cameras_extent,downsample_factor=10)
+            else:
+                raise ValueError("Unknown initialisation method "+args.initialisation)
         
         self.point_cloud = scene_info.point_cloud
 

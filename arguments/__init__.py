@@ -56,7 +56,7 @@ class ModelParams(ParamGroup):
         self.eval = False
         self.num_train_images = 5
         self.min_visibility = 1
-        self.random_initialisation = False
+        self.initialisation = "colmap"
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -86,7 +86,7 @@ class OptimizationParams(ParamGroup):
         self.lambda_dssim = 0.2
         self.lambda_depth = 0.5
         self.densification_interval = 300
-        self.opacity_reset_interval = 30000
+        self.opacity_reset_interval = 2400
         self.densify_from_iter = 500
         self.densify_until_iter = 15_000
         self.densify_grad_threshold = 0.0002

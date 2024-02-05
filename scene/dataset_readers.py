@@ -108,18 +108,20 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, depth_folde
     sys.stdout.write('\n')
     return cam_infos
 
-def fetchPly(path, visible_in_cameras, camera_ids=None, min_visibility=0):
+def fetchPly(path, visible_in_cameras=None, camera_ids=None, min_visibility=0):
     
     plydata = PlyData.read(path)
     vertices = plydata['vertex']
     
-    if camera_ids is not None:
-        mask = [min_visibility <= len(set(camera_ids) & set(visible_in_cameras[i])) for i in range(len(vertices))]
-        
     positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
     colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
-    normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
-    return BasicPointCloud(points=positions[mask], colors=colors[mask], normals=normals[mask], visible_in_cameras=[x for x,m in zip(visible_in_cameras,mask) if m])
+    if camera_ids is not None:
+        normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+        mask = [min_visibility <= len(set(camera_ids) & set(visible_in_cameras[i])) for i in range(len(vertices))]
+        return BasicPointCloud(points=positions[mask], colors=colors[mask], normals=normals[mask], visible_in_cameras=[x for x,m in zip(visible_in_cameras,mask) if m])
+    else:
+        normals = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
+        return BasicPointCloud(points=positions, colors=colors, normals=normals, visible_in_cameras=None)
 
 def storePly(path, xyz, rgb):
     # Define the dtype for the structured array
