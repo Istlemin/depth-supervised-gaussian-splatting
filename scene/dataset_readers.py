@@ -9,6 +9,7 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+import glob
 import os
 import sys
 from PIL import Image
@@ -22,6 +23,7 @@ from pathlib import Path
 from plyfile import PlyData, PlyElement
 from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
+from utils.graphics_utils import focal2fov
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -189,6 +191,87 @@ def readColmapSceneInfo(path, images, eval, num_train_images=1, min_visibility=0
                            test_cameras=test_cam_infos,
                            nerf_normalization=nerf_normalization,
                            ply_path=ply_path)
+    return scene_info
+
+def getTUMIntrinsics(path):
+    lines = (path / "intr.txt").read_text().split("\n")
+    width, height = lines[0].split(" ")
+    fx, _,cx = lines[1].split(" ")
+    _, fy,cy = lines[2].split(" ")
+
+    return int(width),int(height),float(fx),float(fy),float(cx),float(cy)
+
+def getTUMExtrinsics(path):
+    lines = (path / "traj.txt").read_text().split("\n")
+    extrinisics = []
+    for i in range(len(lines)//5):
+        extr = lines[i*5:i*5+5]
+        extr = [[float(x) for x in line.split(" ")] for line in extr]
+        
+        assert extr[0][0]==i
+        assert extr[0][1]==i
+        assert extr[0][2]==i+1
+
+        mat = np.array(extr[1:])
+        zz = np.eye(4)
+        zz[0, 0] = -1
+        zz[2, 2] = -1
+
+        mat = np.linalg.inv(np.dot(mat, zz))
+
+        mat[:3,3:4] = -1 * mat[:3,3:4]
+
+        extrinisics.append(mat)    
+
+    return extrinisics
+
+def readTUMSceneInfo(path,num_train_images=-1,max_total_images=200):
+    path = Path(path)
+    image_folder = path / "rgb"
+    depth_folder = path / "depth"
+    
+    
+    cam_infos_unsorted = []
+    
+    width,height,fx,fy,cx,cy = getTUMIntrinsics(path)
+    FovY = focal2fov(fy,height)
+    FovX = focal2fov(fx,width)
+    extrinsics = list(enumerate(getTUMExtrinsics(path)))
+    extrinsics = extrinsics[::len(extrinsics)//max_total_images]
+    
+    for camera_idx,extr in extrinsics:
+        rgb_image_path = image_folder / f"{camera_idx:0>5}.jpg"
+        depth_image_path = depth_folder / f"{camera_idx:0>5}.png"
+        
+        image = Image.open(rgb_image_path)
+        depth = Image.open(depth_image_path)
+        
+        R = extr[:3, :3].T
+        T = extr[:3, 3]
+        
+        camera_info = CameraInfo(uid=camera_idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image, depth=depth,
+                              image_path=rgb_image_path, image_name=str(camera_idx), width=width, height=height)
+        cam_infos_unsorted.append(camera_info)
+        
+    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+
+    train_idx = [int(round(x)) for x in np.linspace(0,len(cam_infos)-1,num_train_images)]
+
+    if eval:
+        train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in train_idx]
+        test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx not in train_idx]
+    else:
+        train_cam_infos = cam_infos
+        test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    scene_info = SceneInfo(point_cloud=None,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=None)
+
     return scene_info
 
 def readCamerasFromTransforms(path, transformsfile, white_background, extension=".png"):

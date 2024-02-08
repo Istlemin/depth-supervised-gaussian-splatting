@@ -15,7 +15,7 @@ import json
 from re import split
 from utils.graphics_utils import BasicPointCloud
 from utils.system_utils import searchForMaxIteration
-from scene.dataset_readers import sceneLoadTypeCallbacks, fetchPly
+from scene.dataset_readers import readTUMSceneInfo, sceneLoadTypeCallbacks, fetchPly
 from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
@@ -42,7 +42,9 @@ class Scene:
         self.train_cameras = {}
         self.test_cameras = {}
 
-        if os.path.exists(os.path.join(args.source_path, "sparse")):
+        if os.path.exists(os.path.join(args.source_path,"traj.txt")):
+            scene_info = readTUMSceneInfo(args.source_path,args.num_train_images)
+        elif os.path.exists(os.path.join(args.source_path, "sparse")):
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, args.num_train_images, args.min_visibility)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
@@ -51,8 +53,9 @@ class Scene:
             assert False, "Could not recognize scene type!"
 
         if not self.loaded_iter:
-            with open(scene_info.ply_path, 'rb') as src_file, open(os.path.join(self.model_path, "input.ply") , 'wb') as dest_file:
-                dest_file.write(src_file.read())
+            if scene_info.ply_path is not None:
+                with open(scene_info.ply_path, 'rb') as src_file, open(os.path.join(self.model_path, "input.ply") , 'wb') as dest_file:
+                    dest_file.write(src_file.read())
             json_cams = []
             idx = 0
             if scene_info.test_cameras:
@@ -93,7 +96,7 @@ class Scene:
         else:
             if args.initialisation == "random":
                 import numpy as np
-                positions = np.random.uniform(-1,1,(10000,3))*20
+                positions = np.random.uniform(-1,1,(10000,3))*5
                 colors = np.random.uniform(0,1,(10000,3))
                 normals = np.random.uniform(-1,1,(10000,3))
                 pcd = BasicPointCloud(points=positions, colors=colors, normals=normals, visible_in_cameras=None)
