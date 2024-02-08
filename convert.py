@@ -58,8 +58,8 @@ if not args.skip_matching:
     mapper_cmd = (colmap_command + " mapper \
         --database_path " + args.source_path + "/distorted/database.db \
         --image_path "  + args.source_path + "/input \
-        --output_path "  + args.source_path + "/distorted/sparse \
-        --Mapper.ba_global_function_tolerance=0.000001")
+        --output_path "  + args.source_path + "/distorted/sparse")
+    #--Mapper.ba_global_function_tolerance=0.000001")
     exit_code = os.system(mapper_cmd)
     if exit_code != 0:
         logging.error(f"Mapper failed with code {exit_code}. Exiting.")

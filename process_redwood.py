@@ -9,8 +9,9 @@ def process_scene(image_folder:Path, max_num_images=200):
     name = image_folder.parts[-1]
     
     rgb_images = glob(str(image_folder / "rgb" / "*"))
-    #rgb_images = sorted(rgb_images)[::len(rgb_images)//(max_num_images) + 1]
-    rgb_images = sorted(rgb_images)[:max_num_images]
+    #rgb_images = sorted(rgb_images)[:550]
+    rgb_images = sorted(rgb_images)[::len(rgb_images)//(max_num_images) + 1]
+    #rgb_images = sorted(rgb_images)[:max_num_images]
     
     depth_images_names = [Path(x).parts[-1] for x in glob(str(image_folder / "depth" / "*"))]
     depth_image_times = np.array([float(x.split("-")[1].split(".")[0]) for x in depth_images_names])
@@ -41,5 +42,5 @@ def process_scene(image_folder:Path, max_num_images=200):
         print(depth_image)
     
 if __name__=="__main__":
-    process_scene(Path("../data/redwood/00013/"))
+    process_scene(Path("../data/redwood/00002_copy/"))
     
