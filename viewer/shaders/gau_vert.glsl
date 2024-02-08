@@ -164,7 +164,7 @@ void main()
 	if (render_mod == -1)
 	{
 		float depth = -g_pos_view.z;
-		depth = depth * .07;
+		depth = depth * .5;
 		depth = depth < 1 ? 1 : depth;
 		depth = 1.0 - 1.0 / depth;
 		color = vec3(depth, depth, depth);

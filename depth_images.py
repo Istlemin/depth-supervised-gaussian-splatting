@@ -33,7 +33,7 @@ def calibrate_depth(scene):
     # print(alpha,beta)
     
     beta = 0
-    alpha = 2.5
+    alpha = 1.0#2.5
     
     for train_camera in scene.getTrainCameras():
         train_camera.depth[train_camera.depth!=0] = train_camera.depth[train_camera.depth!=0]*alpha+beta
