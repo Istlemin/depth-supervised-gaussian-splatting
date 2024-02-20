@@ -14,6 +14,7 @@ import math
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
+from utils.graphics_utils import geom_transform_points
 
 def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, render_depth=True):
     """
@@ -36,7 +37,8 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     if render_depth:
         bg_color = torch.cat([
             bg_color,
-            torch.tensor([1],device=bg_color.device)
+            torch.tensor([0.0],device=bg_color.device),
+            torch.tensor([0.0],device=bg_color.device)
         ])
 
     raster_settings = GaussianRasterizationSettings(
@@ -84,8 +86,18 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
             
             if render_depth:
-                depth = torch.norm(pc.get_xyz-viewpoint_camera.camera_center,dim=1)
+                # pc.get_xyz.retain_grad()
+                # pc.get_xyz.requires_grad_(True)
+                
+                trans_points = geom_transform_points(pc.get_xyz, viewpoint_camera.world_view_transform)
+
+                zval = trans_points[:,2]
+                #depth = torch.norm(pc.get_xyz-viewpoint_camera.camera_center,dim=1)
+                depth = zval
+                #depth.retain_grad()
+                #depth.requires_grad_(True)
                 colors_precomp = torch.concat([colors_precomp,depth.reshape((-1,1))],dim=1)
+                colors_precomp = torch.concat([colors_precomp,torch.ones_like(depth).reshape((-1,1))],dim=1)
         else:
             shs = pc.get_features
     else:
@@ -103,12 +115,20 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         cov3D_precomp = cov3D_precomp)
 
     render_rgb = rendered_image[:3]
-    render_depth = rendered_image[3:]*torch.exp(pc.depth_scale)
+    render_depth = rendered_image[3:4]*torch.exp(pc.depth_scale)
+    render_opacity = rendered_image[4:]*torch.exp(pc.depth_scale)
+
+    render_depth = render_depth/torch.clamp(render_opacity,0.05,10000)
+
+
+    # render_depth.retain_grad()
+    # render_depth.requires_grad_(True)
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
     return {"render": render_rgb,
             "render_depth": render_depth,
+            "render_opacity": render_opacity,
             "viewspace_points": screenspace_points,
             "visibility_filter" : radii > 0,
             "radii": radii}

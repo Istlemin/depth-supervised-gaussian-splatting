@@ -101,6 +101,7 @@ class Camera:
             pitch = yoffset * self.rot_sensitivity
 
             front = rotation_matrix(up,yaw) @ rotation_matrix(right, pitch) @ front
+            self.up = rotation_matrix(up,yaw) @ rotation_matrix(right, pitch) @ self.up
             self.target[:] = self.position + front
             
             self.is_pose_dirty = True
@@ -173,7 +174,7 @@ class Camera:
         front = np.array(camera["rotation"]) @ np.array([0.0,0.0,1])
         self.up = np.array(camera["rotation"]) @ np.array([0.0,-1,0])
         self.target = front + self.position
-        self.fovy = focal2fov(camera["fy"],camera["height"])
+        self.fovy = np.abs(focal2fov(camera["fy"],camera["height"]))
         self.is_intrin_dirty = True
 
 

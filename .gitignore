@@ -11,3 +11,5 @@ train_logs/*
 *.ply
 
 *.json
+
+*.png

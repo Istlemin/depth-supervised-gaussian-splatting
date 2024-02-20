@@ -19,6 +19,8 @@ from scene.dataset_readers import readTUMSceneInfo, sceneLoadTypeCallbacks, fetc
 from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
+from depth_images import camera_to_pcd
+import torch
 
 class Scene:
 
@@ -104,8 +106,15 @@ class Scene:
             elif args.initialisation == "colmap":
                 self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
             elif args.initialisation == "depth":
-                depth_pcd = fetchPly("test.ply")
-                self.gaussians.create_from_pcd(depth_pcd, self.cameras_extent,downsample_factor=10)
+                all_points = []
+                all_colors = []
+                for camera in self.getTrainCameras():
+                    points, colors = camera_to_pcd(camera)
+
+                    all_points.append(points)
+                    all_colors.append(colors)
+                pcd = BasicPointCloud(points=torch.cat(all_points).cpu(), colors=torch.cat(all_colors).cpu(), normals=torch.cat(all_points), visible_in_cameras=None)
+                self.gaussians.create_from_pcd(pcd, self.cameras_extent,max_gaussians=100000)
             else:
                 raise ValueError("Unknown initialisation method "+args.initialisation)
         

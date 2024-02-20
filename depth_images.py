@@ -1,4 +1,4 @@
-from utils.graphics_utils import geom_transform_points
+from utils.graphics_utils import geom_transform_points, fov2focal
 import torch
 import numpy as np
 
@@ -40,4 +40,40 @@ def calibrate_depth(scene):
     
     for test_camera in scene.getTestCameras():
         test_camera.depth[test_camera.depth!=0] = test_camera.depth[test_camera.depth!=0]*alpha+beta
+
+def depth_image_to_point_cloud(depth, camera):
+    mat = camera.world_view_transform.T
+
+    fx = fov2focal(camera.FoVx,camera.image_width)
+    fy = fov2focal(camera.FoVy,camera.image_height)
+    cx = camera.image_width/2
+    cy = camera.image_height/2
+
+    _,h,w = depth.shape
+
+    device = depth.device
+    pixel_coords = torch.zeros((h,w,2),device = device).float()
+
+    pixel_coords[:,:,1], pixel_coords[:,:,0]  = torch.meshgrid(torch.arange(0,h,device=device),torch.arange(0,w,device=device),indexing="ij")
     
+    flat_cam_coords = torch.zeros((h,w,3),device=device).float()
+    flat_cam_coords[:,:,0] = (pixel_coords[:,:,0] - cx)/fx
+    flat_cam_coords[:,:,1]  = (pixel_coords[:,:,1] - cy)/fy
+    flat_cam_coords[:,:,2]  = 1
+
+    #flat_origin_dist = flat_cam_coords.norm(dim=2).unsqueeze(0)
+    point_cam_coords = flat_cam_coords.unsqueeze(0) * (depth / 1).unsqueeze(3)
+    
+    if mat is None:
+        return point_cam_coords.reshape((-1,3))
+    else:
+        return geom_transform_points(point_cam_coords.reshape((-1,3)), torch.linalg.inv(mat).T)
+
+
+
+def camera_to_pcd(camera):
+    depth = camera.depth.cuda()
+    points = depth_image_to_point_cloud(depth,camera)
+    colors = camera.original_image.permute((1,2,0)).reshape((-1,3))
+
+    return points, colors

@@ -125,6 +125,8 @@ def update_model_path(path):
     g_all_iterations = sorted(glob.glob(path+"/point_cloud/iteration_*/point_cloud.ply"),key=lambda x:int(x.split("_")[-2].split("\\")[0].split("/")[0]))
     g_all_iterations = [Path(x).parts[-2] for x in g_all_iterations]
     cameras = json.load(open(path+"/cameras.json","r"))
+
+    cameras.sort(key=lambda c:int(c["split"]=="test"))
     return update_iteration(len(g_all_iterations)-1)
 
 def update_iteration(chosen_iteration):

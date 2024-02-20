@@ -29,12 +29,14 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
+import torchvision
+
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
-    calibrate_depth(scene)
+    #calibrate_depth(scene)
     
     gaussians.training_setup(opt)
     if checkpoint:
@@ -96,7 +98,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         
         gt_depth = viewpoint_cam.depth.cuda()
         Ll1_depth = l1_loss(render_pkg["render_depth"]*(gt_depth>0), gt_depth)
-        
+
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
 
         loss = loss * (1.0 - opt.lambda_depth) + opt.lambda_depth * Ll1_depth
@@ -120,9 +122,19 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             # Log and save
             training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
-            if (iteration in saving_iterations):
+
+
+            if (iteration in saving_iterations) or iteration==1:
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
+                import dill
+
+                dill.dump(viewpoint_cam,open("tmp/viewpoint_cam","wb"))
+                dill.dump(gaussians,open("tmp/gaussians","wb"))
+                dill.dump(pipe,open("tmp/pipe","wb"))
+                dill.dump(bg,open("tmp/bg","wb"))
+                torchvision.utils.save_image(0.2*render_pkg["render_depth"]*(gt_depth>0), "render_depth.png")
+                torchvision.utils.save_image(0.2*gt_depth, "gt_depth.png")
 
             # Densification
             if iteration < opt.densify_until_iter:
@@ -135,6 +147,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
                 
                 if (iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter)) and len(gaussians.get_xyz) > 10000:
+                    print("Resetting Opacity!")
                     gaussians.reset_opacity()
 
             # Optimizer step
