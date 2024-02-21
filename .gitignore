@@ -13,3 +13,5 @@ train_logs/*
 *.json
 
 *.png
+
+*.so

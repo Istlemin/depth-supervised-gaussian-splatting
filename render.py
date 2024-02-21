@@ -46,7 +46,6 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
 
         if render_type == "texture":
             rendering_pkg = textured_render_multicam(view, texture_views,gaussians, pipeline, background,exclude_texture_idx=(idx if name=="train" else None))
-
             render_textured = cv2.inpaint(
                 (rendering_pkg["render_textured"].cpu().numpy().transpose((1,2,0))*255).astype(np.uint8),
                 (~rendering_pkg["render_textured_mask"].cpu().numpy()).transpose((1,2,0)).astype(np.uint8),
@@ -94,12 +93,12 @@ if __name__ == "__main__":
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")
-    parser.add_argument("--texture_render", action="store_true")
+    parser.add_argument("--textured_render", action="store_true")
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
 
     render_type = "normal"
-    if args.texture_render:
+    if args.textured_render:
         render_type = "texture"
 
     # Initialize system state (RNG)
