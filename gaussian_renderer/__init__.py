@@ -114,7 +114,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         rotations = rotations,
         cov3D_precomp = cov3D_precomp)
 
-    render_rgb = rendered_image[:3]
+   render_rgb = rendered_image[:3]
     render_depth = rendered_image[3:4]*torch.exp(pc.depth_scale)
     render_opacity = rendered_image[4:]*torch.exp(pc.depth_scale)
 
