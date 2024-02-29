@@ -26,7 +26,7 @@ class Scene:
 
     gaussians : GaussianModel
 
-    def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, shuffle=True, resolution_scales=[1.0]):
+    def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, load_ply=None, shuffle=True, resolution_scales=[1.0]):
         """b
         :param path: Path to colmap scene main folder.
         """
@@ -95,6 +95,8 @@ class Scene:
                                                            "point_cloud",
                                                            "iteration_" + str(self.loaded_iter),
                                                            "point_cloud.ply"))
+        elif load_ply:
+            self.gaussians.load_ply(load_ply)
         else:
             if args.initialisation == "random":
                 import numpy as np
@@ -114,10 +116,12 @@ class Scene:
                     all_points.append(points)
                     all_colors.append(colors)
                 pcd = BasicPointCloud(points=torch.cat(all_points).cpu(), colors=torch.cat(all_colors).cpu(), normals=torch.cat(all_points), visible_in_cameras=None)
-                self.gaussians.create_from_pcd(pcd, self.cameras_extent,max_gaussians=100000)
+                self.gaussians.create_from_pcd(pcd, self.cameras_extent,max_gaussians=5000)
             else:
                 raise ValueError("Unknown initialisation method "+args.initialisation)
         
+
+
         self.point_cloud = scene_info.point_cloud
 
     def save(self, iteration):

@@ -32,6 +32,8 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
     makedirs(render_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
 
+    print(views[0].colmap_id)
+
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         #import dill
 
@@ -53,6 +55,8 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
                 cv2.INPAINT_TELEA
             )
             render_textured = torch.tensor(render_textured).permute((2,0,1)).float()/255
+            
+            #render_textured = rendering_pkg["render_textured"]
             torchvision.utils.save_image(render_textured, os.path.join(render_path, '{0:05d}'.format(idx) + "_texture.png"))
         else:
             rendering_pkg = render(view, gaussians, pipeline, background)

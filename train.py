@@ -10,9 +10,11 @@
 #
 
 import os
+import time
 import torch
 from random import randint
-from depth_images import calibrate_depth
+from depth_images import calibrate_depth, depth_smoothness_loss
+from textured_render import prerender_depth, textured_render_multicam
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
 import sys
@@ -31,11 +33,11 @@ except ImportError:
 
 import torchvision
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, init_gaussian_ply):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
-    scene = Scene(dataset, gaussians)
+    scene = Scene(dataset, gaussians, load_ply=init_gaussian_ply)
     #calibrate_depth(scene)
     
     gaussians.training_setup(opt)
@@ -82,6 +84,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if not viewpoint_stack:
             viewpoint_stack = scene.getTrainCameras().copy()
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
+        
+        # selected_cameras = []
+        # for camera in scene.getTrainCameras():
+        #     if camera.colmap_id in [1022]:
+        #         viewpoint_cam = camera
+        #         #selected_cameras.append(camera)
+
+        #viewpoint_cam = selected_cameras[iteration%len(selected_cameras)]
+        selected_cameras = scene.getTrainCameras()
+        #print(viewpoint_cam.colmap_id)
 
         # Render
         if (iteration - 1) == debug_from:
@@ -89,19 +101,47 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
-        render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
-        image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+        if opt.textured_render:
+            if iteration%10==1:
+                print("Prerendering Depths for shadow mapping")
+                start_time = time.time()
+                prerender_depth(selected_cameras, gaussians, pipe, bg)
+                print("Took time ", time.time() - start_time)
+            render_pkg = textured_render_multicam(viewpoint_cam, selected_cameras,gaussians, pipe, background,exclude_texture_idx=viewpoint_cam.colmap_id)
 
-        # Loss
-        gt_image = viewpoint_cam.original_image.cuda()
-        Ll1 = l1_loss(image, gt_image)
-        
+            viewspace_point_tensor, visibility_filter, radii = render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+
+            mask = render_pkg["render_textured_mask"]
+            image = render_pkg["render_textured"] * mask
+
+            gt_image = viewpoint_cam.original_image.cuda() * mask
+            Ll1 = l1_loss(image, gt_image)
+            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+
+            loss += ((render_pkg["render_opacity"]-1)**2).mean()*100
+
+            if iteration%10==0:
+                torchvision.utils.save_image(image,"tmp/img.png")
+                torchvision.utils.save_image(render_pkg["render_depth"]*0.2,"tmp/depth.png")
+                torchvision.utils.save_image(render_pkg["render_opacity"],"tmp/opacity.png")
+                torchvision.utils.save_image(mask.float(),"tmp/mask.png")
+        else:
+            render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
+            image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+
+            # Loss
+            gt_image = viewpoint_cam.original_image.cuda()
+            Ll1 = l1_loss(image, gt_image)
+            
+            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+
+
         gt_depth = viewpoint_cam.depth.cuda()
         Ll1_depth = l1_loss(render_pkg["render_depth"]*(gt_depth>0), gt_depth)
-
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
-
         loss = loss * (1.0 - opt.lambda_depth) + opt.lambda_depth * Ll1_depth
+        
+        #loss += depth_smoothness_loss(render_pkg["render_depth"], viewpoint_cam.original_image.cuda())
+        #print(depth_smoothness_loss(render_pkg["render_depth"], viewpoint_cam.original_image.cuda()))
         #print(f"{Ll1.item():.5f} {Ll1_2.item():.5f} {gaussians.depth_scale.item():.5f}")
         loss.backward()
 
@@ -109,8 +149,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         with torch.no_grad():
             # Progress bar
-            ema_loss_for_log = 0.4 * Ll1.item() + 0.6 * ema_loss_for_log
-            ema_loss_depth_for_log = 0.4 * Ll1_depth.item() + 0.6 * ema_loss_depth_for_log
+            ema_loss_for_log = 0.1 * Ll1.item() + 0.9 * ema_loss_for_log
+            ema_loss_depth_for_log = 0.1 * Ll1_depth.item() + 0.9 * ema_loss_depth_for_log
             if iteration % 10 == 0:
                 progress_bar.set_postfix({
                     "Loss": f"{ema_loss_for_log:.{7}f}",
@@ -127,12 +167,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if (iteration in saving_iterations) or iteration==1:
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
-                import dill
+                # import dill
 
-                dill.dump(viewpoint_cam,open("tmp/viewpoint_cam","wb"))
-                dill.dump(gaussians,open("tmp/gaussians","wb"))
-                dill.dump(pipe,open("tmp/pipe","wb"))
-                dill.dump(bg,open("tmp/bg","wb"))
+                # dill.dump(viewpoint_cam,open("tmp/viewpoint_cam","wb"))
+                # dill.dump(gaussians,open("tmp/gaussians","wb"))
+                # dill.dump(pipe,open("tmp/pipe","wb"))
+                # dill.dump(bg,open("tmp/bg","wb"))
                 torchvision.utils.save_image(0.2*render_pkg["render_depth"]*(gt_depth>0), "render_depth.png")
                 torchvision.utils.save_image(0.2*gt_depth, "gt_depth.png")
 
@@ -237,6 +277,7 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    parser.add_argument("--init_gaussian_ply", type=str, default = None)
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
@@ -251,7 +292,7 @@ if __name__ == "__main__":
     # Start GUI server, configure and run training
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), test_iterations, save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    training(lp.extract(args), op.extract(args), pp.extract(args), test_iterations, save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, init_gaussian_ply=args.init_gaussian_ply)
 
     # All done
     print("\nTraining complete.")

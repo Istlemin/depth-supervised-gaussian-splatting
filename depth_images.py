@@ -1,6 +1,8 @@
 from utils.graphics_utils import geom_transform_points, fov2focal
 import torch
 import numpy as np
+from utils.graphics_utils import fov2focal
+
 
 def calibrate_depth(scene):
     # all_colmap_depths = []
@@ -77,3 +79,43 @@ def camera_to_pcd(camera):
     colors = camera.original_image.permute((1,2,0)).reshape((-1,3))
 
     return points, colors
+
+def camera_frustrum_points(camera):
+    mat = camera.world_view_transform.T
+
+    fx = fov2focal(camera.FoVx,camera.image_width)
+    fy = fov2focal(camera.FoVy,camera.image_height)
+    cx = camera.image_width/2
+    cy = camera.image_height/2
+
+    _,h,w = camera.original_image.shape
+
+    device = camera.original_image.device
+
+    y, x  = torch.meshgrid(torch.tensor(list(range(0,h,100)) + [h-1],device=device),torch.tensor(list(range(0,w,100)) + [w-1],device=device),indexing="ij")
+    
+    flat_cam_coords = torch.zeros((y.shape[0],y.shape[1],3),device=device).float()
+    flat_cam_coords[:,:,0] = (x - cx)/fx
+    flat_cam_coords[:,:,1]  = (y - cy)/fy
+    flat_cam_coords[:,:,2]  = 1
+
+    point_cam_coords = torch.cat([
+        flat_cam_coords*0.5,
+        flat_cam_coords*1,
+        flat_cam_coords*2,
+    ]).reshape((-1,3))
+
+    if mat is None:
+        return point_cam_coords.reshape((-1,3))
+    else:
+        return geom_transform_points(point_cam_coords.reshape((-1,3)), torch.linalg.inv(mat).T)
+    
+def depth_smoothness_loss(depth_image, image,alpha=20):
+    dx_depth = depth_image[:,1:,:]-depth_image[:,:-1,:]
+    dy_depth = depth_image[:,1:,:]-depth_image[:,:-1,:]
+    dx_image = image[:,1:,:]-image[:,:-1,:]
+    dy_image = image[:,1:,:]-image[:,:-1,:]
+    loss = (torch.abs(dx_depth)*torch.exp(-dx_image*alpha)).sum() / torch.exp(-dx_image*alpha).sum()
+    loss = (torch.abs(dy_depth)*torch.exp(-dy_image*alpha)).sum() / torch.exp(-dy_image*alpha).sum()
+
+    return loss*100

@@ -15,3 +15,5 @@ train_logs/*
 *.png
 
 *.so
+
+tmp/*
