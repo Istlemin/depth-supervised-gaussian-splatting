@@ -14,6 +14,9 @@ import sys
 from datetime import datetime
 import numpy as np
 import random
+import Imath
+import OpenEXR as exr
+from pathlib import Path
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
@@ -131,3 +134,13 @@ def safe_state(silent):
     np.random.seed(0)
     torch.manual_seed(0)
     torch.cuda.set_device(torch.device("cuda:0"))
+
+
+def read_depth_exr_file(filepath: Path):
+    exrfile = exr.InputFile(filepath.as_posix())
+    raw_bytes = exrfile.channel('B', Imath.PixelType(Imath.PixelType.FLOAT))
+    depth_vector = np.frombuffer(raw_bytes, dtype=np.float32)
+    height = exrfile.header()['displayWindow'].max.y + 1 - exrfile.header()['displayWindow'].min.y
+    width = exrfile.header()['displayWindow'].max.x + 1 - exrfile.header()['displayWindow'].min.x
+    depth_map = np.reshape(depth_vector, (height, width))
+    return depth_map

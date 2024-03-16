@@ -10,7 +10,7 @@ import torchvision
 from depth_images import camera_frustrum_points, depth_image_to_point_cloud
 from tqdm import tqdm
 
-def textured_render(render_points,viewpoint_camera, texture_camera):
+def textured_render(render_points,viewpoint_camera, texture_camera, texture_scale, shadowmap_tol=0.1):
 
     #texture_coords = geom_transform_points(render_points, texture_camera.full_proj_transform)
     points_texture_camera = geom_transform_points(render_points, texture_camera.world_view_transform)
@@ -18,30 +18,33 @@ def textured_render(render_points,viewpoint_camera, texture_camera):
     texture_coords = (texture_camera.proj_mat @ points_texture_camera.T).T
     texture_coords = (texture_coords/ texture_coords[:,2].reshape((-1,1)))[:,:2]
     
-    texture_coords[:,0] = (texture_coords[:,0]-texture_camera.image_width/2)/(texture_camera.image_width/2)
-    texture_coords[:,1] = (texture_coords[:,1]-texture_camera.image_height/2)/(texture_camera.image_height/2)
+    texture_coords[:,0] = (texture_coords[:,0]+0.5-texture_camera.image_width/2)/(texture_camera.image_width/2)
+    texture_coords[:,1] = (texture_coords[:,1]+0.5-texture_camera.image_height/2)/(texture_camera.image_height/2)
 
     _,tex_h, tex_w = texture_camera.original_image.shape
 
-    texture_color = torch.nn.functional.grid_sample((texture_camera.original_image).reshape((1,3,tex_h,tex_w)), texture_coords.reshape((1,1,-1,2)),align_corners=False)
+    texture_color = torch.nn.functional.grid_sample((texture_camera.image_scales[texture_scale]).unsqueeze(0), texture_coords.reshape((1,1,-1,2)),align_corners=False,padding_mode="border",mode='bicubic')
     texture_color = texture_color.reshape((3,viewpoint_camera.image_height,viewpoint_camera.image_width))
 
-    texture_camera_target_depth = torch.nn.functional.grid_sample(texture_camera.rendered_depth.reshape((1,1,tex_h,tex_w)), texture_coords.reshape((1,1,-1,2)),align_corners=False)
+    texture_camera_target_depth = torch.nn.functional.grid_sample(texture_camera.rendered_depth_scales[texture_scale].unsqueeze(0), texture_coords.reshape((1,1,-1,2)),align_corners=False,mode='bicubic')
     texture_camera_target_depth = texture_camera_target_depth.reshape((1,viewpoint_camera.image_height,viewpoint_camera.image_width))
 
-    not_in_shadow = (texture_camera_depth - texture_camera_target_depth)<0.1
+    # not_in_shadow = (abs(texture_camera_depth - texture_camera_target_depth)<0.05).float()
+    
+    shadowmap_diff = texture_camera_depth - texture_camera_target_depth
+    not_in_shadow = torch.exp(-shadowmap_diff**2/shadowmap_tol**2)
 
     texture_coords = texture_coords.reshape((1,viewpoint_camera.image_height,viewpoint_camera.image_width,2))
-    not_in_shadow = not_in_shadow & (texture_camera_depth>0.2) & (texture_coords[:,:,:,0]<1) & (texture_coords[:,:,:,0]>-1) & (texture_coords[:,:,:,1]>-1) & (texture_coords[:,:,:,1]<1)
+    #not_in_shadow = not_in_shadow & (texture_camera_depth>0.2) & (texture_coords[:,:,:,0]<1) & (texture_coords[:,:,:,0]>-1) & (texture_coords[:,:,:,1]>-1) & (texture_coords[:,:,:,1]<1)
 
     tex_vec = texture_camera.camera_center - render_points
     view_vec = viewpoint_camera.camera_center - render_points
 
     eps = 1e-4
-    pixel_camera_score = ((tex_vec / (tex_vec.norm(dim=1).unsqueeze(1)+eps)) * (view_vec / (view_vec.norm(dim=1).unsqueeze(1)+eps))).sum(dim=1) / (tex_vec.norm(dim=1)+eps)
+    pixel_camera_score = ((tex_vec / (tex_vec.norm(dim=1).unsqueeze(1)+eps)) * (view_vec / (view_vec.norm(dim=1).unsqueeze(1)+eps))).sum(dim=1)**2 / (tex_vec.norm(dim=1)+eps)
     pixel_camera_score = pixel_camera_score.reshape((1,viewpoint_camera.image_height,viewpoint_camera.image_width))
     # print((texture_color*not_in_shadow).sum().item())
-    return texture_color*not_in_shadow, not_in_shadow, pixel_camera_score
+    return texture_color, not_in_shadow, pixel_camera_score
 
 import torch
 import math
@@ -72,7 +75,7 @@ def blur(img):
     img3 = torch.nn.functional.conv2d(img2,horizontal_kernel[:channels,:channels],padding='same')
     return img3[0]
 
-def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianModel, pipe, bg_color : torch.Tensor,exclude_texture_idx=-1):
+def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianModel, pipe, bg_color : torch.Tensor,exclude_texture_idx=-1, blur_inpaint=False, texture_scale=0):
     render_pkg_view = render(viewpoint_camera, pc, pipe, bg_color)
 
     render_textured = torch.zeros_like(viewpoint_camera.original_image)
@@ -94,7 +97,22 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
             
         #print("Vis cams:",len(visible_texture_cameras))
 
-
+    visible_texture_cameras = texture_cameras
+    # visible_texture_cameras = [viewpoint_camera]
+    
+    visible_texture_cameras.sort(key=(lambda cam: torch.norm(cam.camera_center-viewpoint_camera.camera_center)))
+    visible_texture_cameras = visible_texture_cameras[:5]
+    
+    for camera in tqdm(visible_texture_cameras):
+        if not hasattr(camera,"rendered_depth"):
+            camera.rendered_depth = render(camera, pc, pipe, bg_color)["render_depth"]
+        camera.rendered_depth_scales = [camera.rendered_depth]
+        for _ in range(5):
+            #print(camera.rendered_depth.shape)
+            camera.rendered_depth_scales.append(torch.nn.functional.interpolate(camera.rendered_depth_scales[-1].unsqueeze(0),scale_factor=0.5,mode="area")[0])
+            
+        camera.proj_mat = camera.get_proj_mat().cuda()
+    
     texture_colors = []
     texture_masks = []
     texture_scores = []
@@ -103,8 +121,9 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
         if texture_camera.colmap_id == exclude_texture_idx:
             continue
         
+        
         #print(texture_camera.colmap_id, exclude_texture_idx)
-        curr_texture_colors, curr_texture_mask,pixel_camera_score = textured_render(render_points,viewpoint_camera, texture_camera)
+        curr_texture_colors, curr_texture_mask,pixel_camera_score = textured_render(render_points,viewpoint_camera, texture_camera, texture_scale=texture_scale)
 
         texture_colors.append(curr_texture_colors)
         texture_masks.append(curr_texture_mask)
@@ -112,10 +131,31 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
 
     texture_colors = torch.stack(texture_colors)
     texture_masks = torch.stack(texture_masks)
-    texture_scores = torch.stack(texture_scores)    
-    texture_scores = torch.exp(texture_scores*10-(~texture_masks)*10000)
-    render_textured = (texture_colors *texture_scores).sum(dim=0) / (texture_scores.sum(dim=0)+1e-6)
-    render_textured_mask = torch.sum(texture_masks,dim=0)>0
+    texture_scores = torch.stack(texture_scores)
+
+    return {
+        "render_textured": texture_colors,
+        "render_textured_mask": texture_masks,
+        **render_pkg_view
+    }
+
+    eps = 1e-10
+    #texture_scores = torch.exp((texture_scores-0.5*(1-texture_masks)+0.5)*100)
+    
+    softmax_texture_camera_selection = False
+    texture_scores = texture_scores-1*(1-texture_masks)
+    if softmax_texture_camera_selection:
+        texture_scores = texture_scores-texture_scores.min()
+        texture_scores = torch.exp(texture_scores*50)
+    else:
+        texture_scores = (texture_scores==(texture_scores.amax(dim=0).unsqueeze(0)))
+        
+    render_textured = (texture_colors * texture_scores).sum(dim=0) / (texture_scores.sum(dim=0)+eps)
+    #texture_scores.sum(dim=0)<eps
+    #render_textured = render_textured * (texture_scores.sum(dim=0)>eps) + (texture_scores.sum(dim=0)<eps)
+    
+    render_textured_mask = torch.minimum(torch.sum(texture_masks,dim=0),torch.ones_like(torch.sum(texture_masks,dim=0)))
+    
     #     render_textured += curr_texture_colors * (~render_textured_mask)
     #     render_textured_mask = render_textured_mask | curr_texture_mask
 
@@ -124,13 +164,14 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
 
     #torch.nn.functional.conv2d(render_textured, )
 
-    eps = 1e-4
-    extra_mask = blur(render_textured_mask.float())
-    extra = blur(render_textured) / torch.clip(extra_mask,eps,10000)
-    
-    render_textured =  render_textured + (~render_textured_mask) * extra * (extra_mask>eps)
-    render_textured_mask = render_textured_mask | (extra_mask>eps)
-    #print((render_textured).sum().item())
+    if blur_inpaint:
+        eps = 1e-4
+        extra_mask = blur(render_textured_mask.float())
+        extra = blur(render_textured) / torch.clip(extra_mask,eps,10000)
+        
+        render_textured =  render_textured + (~render_textured_mask) * extra * (extra_mask>eps)
+        render_textured_mask = render_textured_mask | (extra_mask>eps)
+        #print((render_textured).sum().item())
     return {
         "render_textured": render_textured,
         "render_textured_mask": render_textured_mask,
@@ -140,5 +181,11 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
 def prerender_depth(cameras, pc, pipe, bg_color):
     with torch.no_grad():
         for camera in tqdm(cameras):
-            camera.rendered_depth = render(camera, pc, pipe, bg_color)["render_depth"]
+            if not hasattr(camera,"rendered_depth"):
+                camera.rendered_depth = render(camera, pc, pipe, bg_color)["render_depth"]
+            camera.rendered_depth_scales = [camera.rendered_depth]
+            for _ in range(5):
+                #print(camera.rendered_depth.shape)
+                camera.rendered_depth_scales.append(torch.nn.functional.interpolate(camera.rendered_depth_scales[-1].unsqueeze(0),scale_factor=0.5,mode="area")[0])
+                
             camera.proj_mat = camera.get_proj_mat().cuda()

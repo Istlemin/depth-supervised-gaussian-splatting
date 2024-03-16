@@ -10,7 +10,7 @@
 #
 
 import torch
-from torch import nn
+from torch import bilinear, nn
 import numpy as np
 from utils.graphics_utils import getWorld2View2, getProjectionMatrix, fov2focal
 
@@ -39,9 +39,18 @@ class Camera(nn.Module):
 
         self.depth = depth
         self.original_image = image.clamp(0.0, 1.0).to(self.data_device)
+        
+        
         self.image_width = self.original_image.shape[2]
         self.image_height = self.original_image.shape[1]
-
+        
+        # self.original_image[:,:,:] = torch.linspace(0,2,self.image_height).reshape((1,self.image_height,1))
+        # self.original_image[:,self.image_height//2:,:]-=1
+        
+        self.image_scales = [self.original_image]
+        for _ in range(5):
+            self.image_scales.append(torch.nn.functional.interpolate(self.image_scales[-1].unsqueeze(0),scale_factor=0.5,mode="area").squeeze())
+            
         if gt_alpha_mask is not None:
             self.original_image *= gt_alpha_mask.to(self.data_device)
         else:

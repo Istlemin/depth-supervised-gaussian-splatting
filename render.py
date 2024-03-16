@@ -47,14 +47,18 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
         #texture_views = views[1:]
 
         if render_type == "texture":
-            rendering_pkg = textured_render_multicam(view, texture_views,gaussians, pipeline, background,exclude_texture_idx=(idx if name=="train" else None))
-            render_textured = cv2.inpaint(
-                (rendering_pkg["render_textured"].cpu().numpy().transpose((1,2,0))*255).astype(np.uint8),
-                (~rendering_pkg["render_textured_mask"].cpu().numpy()).transpose((1,2,0)).astype(np.uint8),
-                10,
-                cv2.INPAINT_TELEA
-            )
-            render_textured = torch.tensor(render_textured).permute((2,0,1)).float()/255
+            rendering_pkg = textured_render_multicam(view, texture_views,gaussians, pipeline, background,exclude_texture_idx=(view.colmap_id if name=="train" else None))
+            
+            if args.inpaint:
+                render_textured = cv2.inpaint(
+                    (rendering_pkg["render_textured"].cpu().numpy().transpose((1,2,0))*255).astype(np.uint8),
+                    (~rendering_pkg["render_textured_mask"].cpu().numpy()).transpose((1,2,0)).astype(np.uint8),
+                    10,
+                    cv2.INPAINT_TELEA
+                )
+                render_textured = torch.tensor(render_textured).permute((2,0,1)).float()/255
+            else:
+                render_textured = rendering_pkg["render_textured"]
             
             #render_textured = rendering_pkg["render_textured"]
             torchvision.utils.save_image(render_textured, os.path.join(render_path, '{0:05d}'.format(idx) + "_texture.png"))
@@ -64,10 +68,11 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
         rendering = rendering_pkg["render"]
         gt = view.original_image[0:3, :, :]
         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
-        torchvision.utils.save_image(rendering_pkg["render_depth"]*0.2, os.path.join(render_path, '{0:05d}'.format(idx) + "_depth.png"))
+        torchvision.utils.save_image(rendering_pkg["render_depth"]*0.02, os.path.join(render_path, '{0:05d}'.format(idx) + "_depth.png"))
         torchvision.utils.save_image(rendering_pkg["render_opacity"], os.path.join(render_path, '{0:05d}'.format(idx) + "_opacity.png"))
-        torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
-        torchvision.utils.save_image(view.depth*0.2, os.path.join(gts_path, '{0:05d}'.format(idx) + "_depth.png"))
+        torchvision.utils.save_image(gt, os.path.join(render_path, '{0:05d}'.format(idx) + "_gt.png"))
+        torchvision.utils.save_image(view.depth*0.02, os.path.join(render_path, '{0:05d}'.format(idx) + "gtdepth.png"))
+        
 
 def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, render_type):
     with torch.no_grad():
@@ -98,6 +103,7 @@ if __name__ == "__main__":
     parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--textured_render", action="store_true")
+    parser.add_argument("--inpaint", action="store_true")
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
 

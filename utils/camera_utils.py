@@ -43,7 +43,7 @@ def loadCam(args, id, cam_info, resolution_scale):
 
     depth = torch.tensor(np.array(cam_info.depth)).float()/1000.0
     
-    resized_depth = torch.nn.functional.interpolate(depth.unsqueeze(0).unsqueeze(0), (resolution[1],resolution[0]), mode='nearest').squeeze(0)
+    resized_depth = torch.nn.functional.interpolate(depth.unsqueeze(0).unsqueeze(0), (resolution[1],resolution[0]), mode='area').squeeze(0)
 
     gt_depth = resized_depth[:1, ...].float()
     

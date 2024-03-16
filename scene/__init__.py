@@ -15,7 +15,7 @@ import json
 from re import split
 from utils.graphics_utils import BasicPointCloud
 from utils.system_utils import searchForMaxIteration
-from scene.dataset_readers import readTUMSceneInfo, sceneLoadTypeCallbacks, fetchPly
+from scene.dataset_readers import readNerfSyntheticInfo, readTUMSceneInfo, sceneLoadTypeCallbacks, fetchPly
 from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
@@ -50,7 +50,7 @@ class Scene:
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, args.num_train_images, args.min_visibility)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
-            scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval)
+            scene_info = readNerfSyntheticInfo(args.source_path, args.white_background, args.num_train_images, args.eval)
         else:
             assert False, "Could not recognize scene type!"
 
@@ -95,6 +95,7 @@ class Scene:
                                                            "point_cloud",
                                                            "iteration_" + str(self.loaded_iter),
                                                            "point_cloud.ply"))
+            
         elif load_ply:
             self.gaussians.load_ply(load_ply)
         else:
@@ -115,7 +116,7 @@ class Scene:
 
                     all_points.append(points)
                     all_colors.append(colors)
-                pcd = BasicPointCloud(points=torch.cat(all_points).cpu(), colors=torch.cat(all_colors).cpu(), normals=torch.cat(all_points), visible_in_cameras=None)
+                pcd = BasicPointCloud(points=(torch.cat(all_points).cpu()), colors=torch.cat(all_colors).cpu(), normals=torch.cat(all_points), visible_in_cameras=None)
                 self.gaussians.create_from_pcd(pcd, self.cameras_extent,max_gaussians=5000)
             else:
                 raise ValueError("Unknown initialisation method "+args.initialisation)
