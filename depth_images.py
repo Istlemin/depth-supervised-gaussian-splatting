@@ -38,10 +38,12 @@ def calibrate_depth(scene):
     alpha = 1.0#2.5
     
     for train_camera in scene.getTrainCameras():
-        train_camera.depth[train_camera.depth!=0] = train_camera.depth[train_camera.depth!=0]*alpha+beta
+        if train_camera.depth!=None:
+            train_camera.depth[train_camera.depth!=0] = train_camera.depth[train_camera.depth!=0]*alpha+beta
     
     for test_camera in scene.getTestCameras():
-        test_camera.depth[test_camera.depth!=0] = test_camera.depth[test_camera.depth!=0]*alpha+beta
+        if test_camera.depth!=None:
+            test_camera.depth[test_camera.depth!=0] = test_camera.depth[test_camera.depth!=0]*alpha+beta
 
 def depth_image_to_point_cloud(depth, camera):
     mat = camera.world_view_transform.T
@@ -64,7 +66,7 @@ def depth_image_to_point_cloud(depth, camera):
     flat_cam_coords[:,:,2]  = 1
 
     #flat_origin_dist = flat_cam_coords.norm(dim=2).unsqueeze(0)
-    point_cam_coords = flat_cam_coords.unsqueeze(0) * (depth / 1).unsqueeze(3)
+    point_cam_coords = flat_cam_coords.unsqueeze(0) * (depth).unsqueeze(3)
     
     if mat is None:
         return point_cam_coords.reshape((-1,3))

@@ -138,7 +138,11 @@ def safe_state(silent):
 
 def read_depth_exr_file(filepath: Path):
     exrfile = exr.InputFile(filepath.as_posix())
-    raw_bytes = exrfile.channel('B', Imath.PixelType(Imath.PixelType.FLOAT))
+    try:
+        raw_bytes = exrfile.channel('V', Imath.PixelType(Imath.PixelType.FLOAT))
+    except TypeError as e:
+        raw_bytes = exrfile.channel('B', Imath.PixelType(Imath.PixelType.FLOAT))
+    
     depth_vector = np.frombuffer(raw_bytes, dtype=np.float32)
     height = exrfile.header()['displayWindow'].max.y + 1 - exrfile.header()['displayWindow'].min.y
     width = exrfile.header()['displayWindow'].max.x + 1 - exrfile.header()['displayWindow'].min.x

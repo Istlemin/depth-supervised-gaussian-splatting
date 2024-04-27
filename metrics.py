@@ -26,7 +26,7 @@ def readImages(renders_dir, gt_dir, textured):
     gts = []
     image_names = []
     for fname in os.listdir(renders_dir):
-        if "_" in fname:
+        if "_" in fname or "depth" in fname:
             continue
 
         fname = fname.split(".")[0]
@@ -36,7 +36,7 @@ def readImages(renders_dir, gt_dir, textured):
         else:
             render = Image.open(renders_dir / f"{fname}.png")
     
-        gt = Image.open(gt_dir / f"{fname}.png")
+        gt = Image.open(renders_dir / f"{fname}_gt.png")
         renders.append(tf.to_tensor(render).unsqueeze(0)[:, :3, :, :].cuda())
         gts.append(tf.to_tensor(gt).unsqueeze(0)[:, :3, :, :].cuda())
         image_names.append(fname)
@@ -88,7 +88,8 @@ def evaluate(model_paths, textured):
 
             full_dict[scene_dir][method].update({"SSIM": torch.tensor(ssims).mean().item(),
                                                     "PSNR": torch.tensor(psnrs).mean().item(),
-                                                    "LPIPS": torch.tensor(lpipss).mean().item()})
+                                                    "LPIPS": torch.tensor(lpipss).mean().item(),
+                                                    "num_gaussians":int((method_dir / "num_gaussians").read_text())})
             per_view_dict[scene_dir][method].update({"SSIM": {name: ssim for ssim, name in zip(torch.tensor(ssims).tolist(), image_names)},
                                                         "PSNR": {name: psnr for psnr, name in zip(torch.tensor(psnrs).tolist(), image_names)},
                                                         "LPIPS": {name: lp for lp, name in zip(torch.tensor(lpipss).tolist(), image_names)}})

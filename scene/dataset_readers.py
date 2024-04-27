@@ -104,7 +104,10 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, depth_folde
         image = Image.open(image_path)
         
         depth_path = os.path.join(depth_folder, f"{image_name}.png")
-        depth = Image.open(depth_path)
+        if Path(depth_path).exists():
+            depth = Image.open(depth_path)
+        else:
+            depth = None
 
         cam_info = CameraInfo(uid=extr.id, R=R, T=T, FovY=FovY, FovX=FovX, image=image, depth=depth,
                               image_path=image_path, image_name=image_name, width=width, height=height)
@@ -285,7 +288,7 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
 
         frames = contents["frames"]
         for idx, frame in enumerate(frames):
-            cam_name = os.path.join(path, frame["file_path"] + extension)
+            cam_name = os.path.join(path, frame["file_path"].replace("\\","/") + extension)
 
             # NeRF 'transform_matrix' is a camera-to-world transform
             c2w = np.array(frame["transform_matrix"])

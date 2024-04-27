@@ -10,7 +10,7 @@ import torchvision
 from depth_images import camera_frustrum_points, depth_image_to_point_cloud
 from tqdm import tqdm
 
-def textured_render(render_points,viewpoint_camera, texture_camera, texture_scale, shadowmap_tol=0.1):
+def textured_render(render_points,viewpoint_camera, texture_camera, texture_scale, shadowmap_tol=0.05):
 
     #texture_coords = geom_transform_points(render_points, texture_camera.full_proj_transform)
     points_texture_camera = geom_transform_points(render_points, texture_camera.world_view_transform)
@@ -23,7 +23,10 @@ def textured_render(render_points,viewpoint_camera, texture_camera, texture_scal
 
     _,tex_h, tex_w = texture_camera.original_image.shape
 
-    texture_color = torch.nn.functional.grid_sample((texture_camera.image_scales[texture_scale]).unsqueeze(0), texture_coords.reshape((1,1,-1,2)),align_corners=False,padding_mode="border",mode='bicubic')
+    texture_camera_image = (texture_camera.image_scales[texture_scale])
+    # texture_camera_image = torch.sigmoid(texture_camera.learnable_image)
+    # texture_camera_image = torch.nn.functional.interpolate(texture_camera_image.unsqueeze(0), texture_camera.image_scales[texture_scale].shape[1:], mode='area').squeeze()
+    texture_color = torch.nn.functional.grid_sample(texture_camera_image.unsqueeze(0), texture_coords.reshape((1,1,-1,2)),align_corners=False,padding_mode="border",mode='bicubic')
     texture_color = texture_color.reshape((3,viewpoint_camera.image_height,viewpoint_camera.image_width))
 
     texture_camera_target_depth = torch.nn.functional.grid_sample(texture_camera.rendered_depth_scales[texture_scale].unsqueeze(0), texture_coords.reshape((1,1,-1,2)),align_corners=False,mode='bicubic')
@@ -75,11 +78,11 @@ def blur(img):
     img3 = torch.nn.functional.conv2d(img2,horizontal_kernel[:channels,:channels],padding='same')
     return img3[0]
 
-def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianModel, pipe, bg_color : torch.Tensor,exclude_texture_idx=-1, blur_inpaint=False, texture_scale=0):
+def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianModel, pipe, bg_color : torch.Tensor,exclude_texture_idx=-1, blur_inpaint=False, texture_scale=0, blend_mode=None,num_texture_views=32):
     render_pkg_view = render(viewpoint_camera, pc, pipe, bg_color)
 
     render_textured = torch.zeros_like(viewpoint_camera.original_image)
-    render_textured_mask  = torch.zeros_like(viewpoint_camera.depth).cuda().bool()
+    render_textured_mask  = torch.zeros((render_textured.shape[0],render_textured.shape[1],1)).cuda().bool()
 
     render_points = depth_image_to_point_cloud(render_pkg_view["render_depth"], viewpoint_camera)
 
@@ -101,9 +104,9 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
     # visible_texture_cameras = [viewpoint_camera]
     
     visible_texture_cameras.sort(key=(lambda cam: torch.norm(cam.camera_center-viewpoint_camera.camera_center)))
-    visible_texture_cameras = visible_texture_cameras[:5]
+    visible_texture_cameras = visible_texture_cameras[1:(num_texture_views)*2+1:2]
     
-    for camera in tqdm(visible_texture_cameras):
+    for camera in (visible_texture_cameras):
         if not hasattr(camera,"rendered_depth"):
             camera.rendered_depth = render(camera, pc, pipe, bg_color)["render_depth"]
         camera.rendered_depth_scales = [camera.rendered_depth]
@@ -118,10 +121,6 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
     texture_scores = []
 
     for i,texture_camera in enumerate(visible_texture_cameras):
-        if texture_camera.colmap_id == exclude_texture_idx:
-            continue
-        
-        
         #print(texture_camera.colmap_id, exclude_texture_idx)
         curr_texture_colors, curr_texture_mask,pixel_camera_score = textured_render(render_points,viewpoint_camera, texture_camera, texture_scale=texture_scale)
 
@@ -133,36 +132,45 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
     texture_masks = torch.stack(texture_masks)
     texture_scores = torch.stack(texture_scores)
 
-    return {
-        "render_textured": texture_colors,
-        "render_textured_mask": texture_masks,
-        **render_pkg_view
-    }
-
-    eps = 1e-10
-    #texture_scores = torch.exp((texture_scores-0.5*(1-texture_masks)+0.5)*100)
-    
-    softmax_texture_camera_selection = False
-    texture_scores = texture_scores-1*(1-texture_masks)
-    if softmax_texture_camera_selection:
-        texture_scores = texture_scores-texture_scores.min()
-        texture_scores = torch.exp(texture_scores*50)
-    else:
-        texture_scores = (texture_scores==(texture_scores.amax(dim=0).unsqueeze(0)))
+    if blend_mode == "alpha":
+        w = torch.zeros_like(texture_masks)
+        T = torch.ones_like(texture_masks[0])
+        render_textured_mask = 1 - torch.prod(1-texture_masks,dim=0)
         
-    render_textured = (texture_colors * texture_scores).sum(dim=0) / (texture_scores.sum(dim=0)+eps)
-    #texture_scores.sum(dim=0)<eps
-    #render_textured = render_textured * (texture_scores.sum(dim=0)>eps) + (texture_scores.sum(dim=0)<eps)
-    
-    render_textured_mask = torch.minimum(torch.sum(texture_masks,dim=0),torch.ones_like(torch.sum(texture_masks,dim=0)))
-    
-    #     render_textured += curr_texture_colors * (~render_textured_mask)
-    #     render_textured_mask = render_textured_mask | curr_texture_mask
+        for i in range(len(visible_texture_cameras)):
+            w[i] = texture_masks[i] * T
+            T = T*(1-texture_masks[i])
+            
+        render_textured = (texture_colors*w).sum(dim=0) + (1-render_textured_mask)*texture_colors[0]
+        
+    else:
+        eps = 1e-10
+        #texture_scores = torch.exp((texture_scores-0.5*(1-texture_masks)+0.5)*100)
+        
+        texture_scores = texture_scores-1*(1-texture_masks)
+        if blend_mode=="scores_softmax":
+            texture_scores = texture_scores-texture_scores.min()
+            texture_scores = torch.exp(texture_scores*50)
+        else:
+            texture_scores = (texture_scores==(texture_scores.amax(dim=0).unsqueeze(0)))
+            
+        render_textured = (texture_colors * texture_scores).sum(dim=0) / (texture_scores.sum(dim=0)+eps)
+        #texture_scores.sum(dim=0)<eps
+        #render_textured = render_textured * (texture_scores.sum(dim=0)>eps) + (texture_scores.sum(dim=0)<eps)
+        
+        render_textured_mask = torch.minimum(torch.sum(texture_masks,dim=0),torch.ones_like(torch.sum(texture_masks,dim=0)))
+        
+        #     render_textured += curr_texture_colors * (~render_textured_mask)
+        #     render_textured_mask = render_textured_mask | curr_texture_mask
 
-    # render_textured = render_textured/torch.clip(render_textured_mask,0.1,10000)
+        # render_textured = render_textured/torch.clip(render_textured_mask,0.1,10000)
 
 
     #torch.nn.functional.conv2d(render_textured, )
+    
+    #render_textured *= render_pkg_view["render_opacity"]
+    render_textured *= (render_pkg_view["render_opacity"]>0.1)
+    render_textured_mask[render_pkg_view["render_opacity"]<=0.1] = 1
 
     if blur_inpaint:
         eps = 1e-4
@@ -172,15 +180,19 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
         render_textured =  render_textured + (~render_textured_mask) * extra * (extra_mask>eps)
         render_textured_mask = render_textured_mask | (extra_mask>eps)
         #print((render_textured).sum().item())
+    
     return {
         "render_textured": render_textured,
         "render_textured_mask": render_textured_mask,
+        "texture_colors": texture_colors,
+        "texture_masks": texture_masks, 
+        "texture_images": [cam.learnable_image for cam in visible_texture_cameras],
         **render_pkg_view
     }
 
 def prerender_depth(cameras, pc, pipe, bg_color):
     with torch.no_grad():
-        for camera in tqdm(cameras):
+        for camera in (cameras):
             if not hasattr(camera,"rendered_depth"):
                 camera.rendered_depth = render(camera, pc, pipe, bg_color)["render_depth"]
             camera.rendered_depth_scales = [camera.rendered_depth]

@@ -107,7 +107,7 @@ class Scene:
                 pcd = BasicPointCloud(points=positions, colors=colors, normals=normals, visible_in_cameras=None)
                 self.gaussians.create_from_pcd(pcd, self.cameras_extent)
             elif args.initialisation == "colmap":
-                self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
+                self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent,max_gaussians=args.start_gaussians)
             elif args.initialisation == "depth":
                 all_points = []
                 all_colors = []
@@ -117,7 +117,7 @@ class Scene:
                     all_points.append(points)
                     all_colors.append(colors)
                 pcd = BasicPointCloud(points=(torch.cat(all_points).cpu()), colors=torch.cat(all_colors).cpu(), normals=torch.cat(all_points), visible_in_cameras=None)
-                self.gaussians.create_from_pcd(pcd, self.cameras_extent,max_gaussians=5000)
+                self.gaussians.create_from_pcd(pcd, self.cameras_extent,max_gaussians=args.start_gaussians)
             else:
                 raise ValueError("Unknown initialisation method "+args.initialisation)
         

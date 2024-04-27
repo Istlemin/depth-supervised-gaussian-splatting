@@ -40,12 +40,14 @@ def loadCam(args, id, cam_info, resolution_scale):
         scale = float(global_down) * float(resolution_scale)
         resolution = (int(orig_w / scale), int(orig_h / scale))
 
-
-    depth = torch.tensor(np.array(cam_info.depth)).float()/1000.0
+    if cam_info.depth is not None:
+        depth = torch.tensor(np.array(cam_info.depth)).float()/1000.0
     
-    resized_depth = torch.nn.functional.interpolate(depth.unsqueeze(0).unsqueeze(0), (resolution[1],resolution[0]), mode='area').squeeze(0)
+        resized_depth = torch.nn.functional.interpolate(depth.unsqueeze(0).unsqueeze(0), (resolution[1],resolution[0]), mode='area').squeeze(0)
 
-    gt_depth = resized_depth[:1, ...].float()
+        gt_depth = resized_depth[:1, ...].float()
+    else:
+        gt_depth = None
     
     resized_image_rgb = PILtoTorch(cam_info.image, resolution)
 

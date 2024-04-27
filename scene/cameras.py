@@ -12,6 +12,7 @@
 import torch
 from torch import bilinear, nn
 import numpy as np
+from utils.general_utils import inverse_sigmoid
 from utils.graphics_utils import getWorld2View2, getProjectionMatrix, fov2focal
 
 class Camera(nn.Module):
@@ -51,6 +52,8 @@ class Camera(nn.Module):
         for _ in range(5):
             self.image_scales.append(torch.nn.functional.interpolate(self.image_scales[-1].unsqueeze(0),scale_factor=0.5,mode="area").squeeze())
             
+        self.learnable_image = torch.nn.Parameter(inverse_sigmoid(self.original_image).clone())
+        
         if gt_alpha_mask is not None:
             self.original_image *= gt_alpha_mask.to(self.data_device)
         else:

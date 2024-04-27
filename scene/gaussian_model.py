@@ -157,7 +157,7 @@ class GaussianModel:
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
         self.depth_scale = nn.Parameter(torch.zeros((1,),device="cuda"))
 
-    def training_setup(self, training_args):
+    def training_setup(self, training_args, learnable_images):
         self.percent_dense = training_args.percent_dense
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
@@ -171,6 +171,10 @@ class GaussianModel:
             {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation"},
             {'params': [self.depth_scale], 'lr': 0, "name": "extra"}
         ]
+        
+        # l = [
+        #     {'params': learnable_images, 'lr': 1e-2, "name": "images"},
+        # ]
 
         self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
         self.xyz_scheduler_args = get_expon_lr_func(lr_init=training_args.position_lr_init*self.spatial_lr_scale,
