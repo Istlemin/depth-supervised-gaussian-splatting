@@ -17,3 +17,8 @@ train_logs/*
 *.so
 
 tmp/*
+
+log
+
+diff_gaussian_rasterization.egg-info
+diff-gaussian-rasterization_modified
