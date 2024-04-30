@@ -16,7 +16,7 @@ import os
 from tqdm import tqdm
 from os import makedirs
 from gaussian_renderer import render
-from textured_render import prerender_depth, textured_render_multicam
+from textured_render import prerender_depth, textured_render_multicam, textured_render_per_gaussian
 import torchvision
 from utils.general_utils import safe_state
 from argparse import ArgumentParser
@@ -53,7 +53,7 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
         #texture_views = views[1:]
 
         if render_type == "texture":
-            rendering_pkg = textured_render_multicam(view, texture_views,gaussians, pipeline, background,exclude_texture_idx=(view.colmap_id if name=="train" else None),blend_mode=blend_mode)
+            rendering_pkg = textured_render_multicam(view, texture_views,gaussians, pipeline, background,in_training=(name=="train"),blend_mode=blend_mode)
             
             if args.inpaint:
                 render_textured = cv2.inpaint(
@@ -69,11 +69,14 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
             #render_textured = rendering_pkg["render_textured"]
             torchvision.utils.save_image(render_textured, os.path.join(render_path, '{0:05d}'.format(idx) + "_texture.png"))
             torchvision.utils.save_image(rendering_pkg["render_opacity"], os.path.join(render_path, '{0:05d}'.format(idx) + "_opacity.png"))
+        elif render_type == "texture_per_gaussian":
+            rendering_pkg = textured_render_per_gaussian(view, texture_views,gaussians, pipeline, background,in_training=(name=="train"))
+            torchvision.utils.save_image(0.1*render(view, gaussians, pipeline, background,render_depth=True,depth_exp=1.0)["render_depth"], os.path.join(render_path, '{0:05d}'.format(idx) + "_depth1.0.png"))
         else:
             rendering_pkg = render(view, gaussians, pipeline, background,render_depth=True)
-            torchvision.utils.save_image(0.1*render(view, gaussians, pipeline, background,render_depth=True,depth_exp=0.25)["render_depth"]**4, os.path.join(render_path, '{0:05d}'.format(idx) + "_depth0.5.png"))
+            #torchvision.utils.save_image(0.1*render(view, gaussians, pipeline, background,render_depth=True,depth_exp=0.25)["render_depth"]**4, os.path.join(render_path, '{0:05d}'.format(idx) + "_depth0.5.png"))
             torchvision.utils.save_image(0.1*render(view, gaussians, pipeline, background,render_depth=True,depth_exp=1.0)["render_depth"], os.path.join(render_path, '{0:05d}'.format(idx) + "_depth1.0.png"))
-            torchvision.utils.save_image(render(view, gaussians, pipeline, background,render_depth=True,depth_exp=4.0)["render_depth"]**0.25-rendering_pkg["render_depth"], os.path.join(render_path, '{0:05d}'.format(idx) + "_depth2.png"),normalize=True)
+            #torchvision.utils.save_image(render(view, gaussians, pipeline, background,render_depth=True,depth_exp=4.0)["render_depth"]**0.25-rendering_pkg["render_depth"], os.path.join(render_path, '{0:05d}'.format(idx) + "_depth2.png"),normalize=True)
             
 
         rendering = rendering_pkg["render"]
@@ -114,15 +117,12 @@ if __name__ == "__main__":
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")
-    parser.add_argument("--textured_render", action="store_true")
+    parser.add_argument("--mode", default="normal",type=str)
     parser.add_argument("--inpaint", action="store_true")
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
 
-    render_type = "normal"
-    if args.textured_render:
-        render_type = "texture"
-
+    render_type = args.mode
     # Initialize system state (RNG)
     safe_state(args.quiet)
 

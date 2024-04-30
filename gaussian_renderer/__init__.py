@@ -77,31 +77,32 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
     shs = None
     colors_precomp = None
-    if override_color is None:
-        if pipe.convert_SHs_python:
+    if pipe.convert_SHs_python:
+        
+        if override_color is None:
             shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
             dir_pp = (pc.get_xyz - viewpoint_camera.camera_center.repeat(pc.get_features.shape[0], 1))
             dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
-            
-            if render_depth:
-                # pc.get_xyz.retain_grad()
-                # pc.get_xyz.requires_grad_(True)
-                
-                trans_points = geom_transform_points(pc.get_xyz, viewpoint_camera.world_view_transform)
-
-                zval = trans_points[:,2]
-                #depth = torch.norm(pc.get_xyz-viewpoint_camera.camera_center,dim=1)
-                depth = zval**depth_exp
-                #depth.retain_grad()
-                #depth.requires_grad_(True)
-                colors_precomp = torch.concat([colors_precomp,depth.reshape((-1,1))],dim=1)
-                colors_precomp = torch.concat([colors_precomp,torch.ones_like(depth).reshape((-1,1))],dim=1)
         else:
-            shs = pc.get_features
+            colors_precomp = override_color
+                    
+        if render_depth:
+            # pc.get_xyz.retain_grad()
+            # pc.get_xyz.requires_grad_(True)
+            
+            trans_points = geom_transform_points(pc.get_xyz, viewpoint_camera.world_view_transform)
+
+            zval = trans_points[:,2]
+            #depth = torch.norm(pc.get_xyz-viewpoint_camera.camera_center,dim=1)
+            depth = zval**depth_exp
+            #depth.retain_grad()
+            #depth.requires_grad_(True)
+            colors_precomp = torch.concat([colors_precomp,depth.reshape((-1,1))],dim=1)
+            colors_precomp = torch.concat([colors_precomp,torch.ones_like(depth).reshape((-1,1))],dim=1)
     else:
-        colors_precomp = override_color
+        shs = pc.get_features
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
     rendered_image, radii = rasterizer(
