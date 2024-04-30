@@ -35,7 +35,7 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
     makedirs(render_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
 
-    print(views[0].colmap_id)
+    print(name)
     
     with open(os.path.join(model_path, name, approach, "num_gaussians"),"w") as f:
         f.write(str(len(gaussians.get_xyz)))
@@ -68,15 +68,20 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
             
             #render_textured = rendering_pkg["render_textured"]
             torchvision.utils.save_image(render_textured, os.path.join(render_path, '{0:05d}'.format(idx) + "_texture.png"))
-            torchvision.utils.save_image(rendering_pkg["render_depth"]*0.1, os.path.join(render_path, '{0:05d}'.format(idx) + "_depth.png"))
             torchvision.utils.save_image(rendering_pkg["render_opacity"], os.path.join(render_path, '{0:05d}'.format(idx) + "_opacity.png"))
         else:
-            rendering_pkg = render(view, gaussians, pipeline, background)
+            rendering_pkg = render(view, gaussians, pipeline, background,render_depth=True)
+            torchvision.utils.save_image(0.1*render(view, gaussians, pipeline, background,render_depth=True,depth_exp=0.25)["render_depth"]**4, os.path.join(render_path, '{0:05d}'.format(idx) + "_depth0.5.png"))
+            torchvision.utils.save_image(0.1*render(view, gaussians, pipeline, background,render_depth=True,depth_exp=1.0)["render_depth"], os.path.join(render_path, '{0:05d}'.format(idx) + "_depth1.0.png"))
+            torchvision.utils.save_image(render(view, gaussians, pipeline, background,render_depth=True,depth_exp=4.0)["render_depth"]**0.25-rendering_pkg["render_depth"], os.path.join(render_path, '{0:05d}'.format(idx) + "_depth2.png"),normalize=True)
+            
 
         rendering = rendering_pkg["render"]
         gt = view.original_image[0:3, :, :]
         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
         torchvision.utils.save_image(gt, os.path.join(render_path, '{0:05d}'.format(idx) + "_gt.png"))
+        
+        torchvision.utils.save_image(rendering_pkg["render_depth"]*0.1, os.path.join(render_path, '{0:05d}'.format(idx) + "_depth.png"))
         if view.depth is not None:
             torchvision.utils.save_image(view.depth*0.1, os.path.join(render_path, '{0:05d}'.format(idx) + "gtdepth.png"))
 

@@ -338,14 +338,15 @@ def readNerfSyntheticInfo(path, white_background, num_train_images, eval, extens
     # if not eval:
     #     train_cam_infos.extend(test_cam_infos)
     #     test_cam_infos = []
-
     cam_infos = sorted(cam_infos.copy(), key = lambda x : x.image_name)
 
+    
     train_idx = [int(round(x)) for x in np.linspace(0,len(cam_infos)-1,num_train_images)]
 
     train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in train_idx]
     test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx not in train_idx]
-        
+    
+    
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
     # ply_path = os.path.join(path, "points3d.ply")

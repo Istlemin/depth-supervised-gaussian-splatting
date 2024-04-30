@@ -85,6 +85,7 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
     render_textured_mask  = torch.zeros((render_textured.shape[0],render_textured.shape[1],1)).cuda().bool()
 
     render_points = depth_image_to_point_cloud(render_pkg_view["render_depth"], viewpoint_camera)
+    #render_points = depth_image_to_point_cloud(viewpoint_camera.depth.cuda()-4e-2, viewpoint_camera)
 
     viewpoint_frustrum_points = camera_frustrum_points(viewpoint_camera)
 
@@ -100,7 +101,7 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
             
         #print("Vis cams:",len(visible_texture_cameras))
 
-    visible_texture_cameras = texture_cameras
+    visible_texture_cameras = texture_cameras[:]
     # visible_texture_cameras = [viewpoint_camera]
     
     visible_texture_cameras.sort(key=(lambda cam: torch.norm(cam.camera_center-viewpoint_camera.camera_center)))
@@ -168,9 +169,11 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
 
     #torch.nn.functional.conv2d(render_textured, )
     
-    #render_textured *= render_pkg_view["render_opacity"]
-    render_textured *= (render_pkg_view["render_opacity"]>0.1)
-    render_textured_mask[render_pkg_view["render_opacity"]<=0.1] = 1
+    opacity = render_pkg_view["render_opacity"]
+    render_textured[:,(opacity[0]<0.15)] *= opacity[(opacity<0.15)]
+    # render_pkg_view["render_opacity"]
+    # render_textured *= (render_pkg_view["render_opacity"]>0.1)
+    # render_textured_mask[render_pkg_view["render_opacity"]<=0.1] = 1
 
     if blur_inpaint:
         eps = 1e-4

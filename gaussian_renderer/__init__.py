@@ -16,7 +16,7 @@ from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 from utils.graphics_utils import geom_transform_points
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, render_depth=True):
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, render_depth=True, depth_exp=1.0):
     """
     Render the scene. 
     
@@ -93,7 +93,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 
                 zval = trans_points[:,2]
                 #depth = torch.norm(pc.get_xyz-viewpoint_camera.camera_center,dim=1)
-                depth = zval
+                depth = zval**depth_exp
                 #depth.retain_grad()
                 #depth.requires_grad_(True)
                 colors_precomp = torch.concat([colors_precomp,depth.reshape((-1,1))],dim=1)

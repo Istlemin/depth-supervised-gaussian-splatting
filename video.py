@@ -9,6 +9,7 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+from pathlib import Path
 import torch
 from depth_images import calibrate_depth
 from scene import Scene
@@ -24,67 +25,14 @@ from arguments import ModelParams, PipelineParams, get_combined_args
 from gaussian_renderer import GaussianModel
 import cv2
 import numpy as np
+from scene.cameras import MiniCam
+import math
+import glm
 
-from utils.loss_utils import gaussian
-
-def render_set(model_path, name, iteration, views,texture_views,gaussians, pipeline, background, blend_mode, render_type):
-    approach = f"{render_type}_{blend_mode}_{iteration}"
-    render_path = os.path.join(model_path, name, approach, "renders")
-    gts_path = os.path.join(model_path, name, approach, "gt")
-
-    makedirs(render_path, exist_ok=True)
-    makedirs(gts_path, exist_ok=True)
-
-    print(views[0].colmap_id)
-    
-    with open(os.path.join(model_path, name, approach, "num_gaussians"),"w") as f:
-        f.write(str(len(gaussians.get_xyz)))
-
-    for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
-        #import dill
-
-        # view = dill.load(open("tmp/viewpoint_cam","rb"))
-        # gaussians2 = dill.load(open("tmp/gaussians","rb"))
-        # pipeline = dill.load(open("tmp/pipe","rb"))
-        # background = dill.load(open("tmp/bg","rb"))
-        
-        #rendering_pkg = render(view, gaussians, pipeline, background)
-        #texture_views = [views[i] for i in [15,21,26,37,42,43,40,69,53,58,72,74,82,98]]
-        #texture_views = views[1:]
-
-        if render_type == "texture":
-            rendering_pkg = textured_render_multicam(view, texture_views,gaussians, pipeline, background,exclude_texture_idx=(view.colmap_id if name=="train" else None),blend_mode=blend_mode)
-            
-            if args.inpaint:
-                render_textured = cv2.inpaint(
-                    (rendering_pkg["render_textured"].cpu().numpy().transpose((1,2,0))*255).astype(np.uint8),
-                    (~rendering_pkg["render_textured_mask"].cpu().numpy()).transpose((1,2,0)).astype(np.uint8),
-                    10,
-                    cv2.INPAINT_TELEA
-                )
-                render_textured = torch.tensor(render_textured).permute((2,0,1)).float()/255
-            else:
-                render_textured = rendering_pkg["render_textured"]
-            
-            #render_textured = rendering_pkg["render_textured"]
-            torchvision.utils.save_image(render_textured, os.path.join(render_path, '{0:05d}'.format(idx) + "_texture.png"))
-            torchvision.utils.save_image(rendering_pkg["render_depth"]*0.1, os.path.join(render_path, '{0:05d}'.format(idx) + "_depth.png"))
-            torchvision.utils.save_image(rendering_pkg["render_opacity"], os.path.join(render_path, '{0:05d}'.format(idx) + "_opacity.png"))
-        else:
-            rendering_pkg = render(view, gaussians, pipeline, background)
-
-        rendering = rendering_pkg["render"]
-        gt = view.original_image[0:3, :, :]
-        torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
-        torchvision.utils.save_image(gt, os.path.join(render_path, '{0:05d}'.format(idx) + "_gt.png"))
-        if view.depth is not None:
-            torchvision.utils.save_image(view.depth*0.1, os.path.join(render_path, '{0:05d}'.format(idx) + "gtdepth.png"))
-
-def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool,blend_mode, render_type):
+def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, output:Path,blend_mode, render_type):
     with torch.no_grad():
         gaussians = GaussianModel(dataset.sh_degree)
         scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
-        calibrate_depth(scene)
 
         print("Num gaussians:", len(gaussians.get_xyz))
 
@@ -93,11 +41,33 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
 
         prerender_depth(scene.getTrainCameras(), gaussians, pipeline, background)
 
-        if not skip_train:
-             render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(),scene.getTrainCameras(), gaussians, pipeline, background,blend_mode, render_type)
-
-        if not skip_test:
-             render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(),scene.getTrainCameras(), gaussians, pipeline, background, blend_mode,render_type)
+        view = scene.getTrainCameras()[0]
+        radius = np.linalg.norm(view.camera_center.cpu())
+        for i in range(100):
+            angle = i*0.03
+            cam_pos = np.array([math.cos(angle),math.sin(angle),-0.5])
+            up = np.array([0,0,-1]).astype(float)
+            
+            M = torch.tensor(np.array(glm.lookAt(cam_pos, np.zeros(3).astype(float), up)))
+            #print(M)
+            view.R = M[:3,:3].numpy().T
+            view.T = np.array([0,0,radius])
+            
+            view.update_transforms()
+            
+            rendering_pkg = textured_render_multicam(
+                view,
+                scene.getTrainCameras(),
+                gaussians,
+                pipeline,
+                background,
+                blend_mode=blend_mode
+            )
+            torchvision.utils.save_image(
+                rendering_pkg["render_textured"],
+                output/f"{i}.png"
+            )
+            
 
 if __name__ == "__main__":
     # Set up command line argument parser
@@ -106,11 +76,11 @@ if __name__ == "__main__":
     pipeline = PipelineParams(parser)
     parser.add_argument("--iteration", default=-1, type=int)
     parser.add_argument("--blend_mode", default="alpha", type=str)
-    parser.add_argument("--skip_train", action="store_true")
-    parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--textured_render", action="store_true")
     parser.add_argument("--inpaint", action="store_true")
+    parser.add_argument("--output", type=Path)
+    
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
 
@@ -121,4 +91,4 @@ if __name__ == "__main__":
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
-    render_sets(model.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, args.blend_mode, render_type)
+    render_sets(model.extract(args), args.iteration, pipeline.extract(args), args.output, args.blend_mode, render_type)
