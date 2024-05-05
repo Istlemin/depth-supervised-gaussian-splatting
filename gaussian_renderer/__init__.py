@@ -14,9 +14,9 @@ import math
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
-from utils.graphics_utils import geom_transform_points
+from utils.graphics_utils import fov2focal, geom_transform_points
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, render_depth=True, depth_exp=1.0):
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, render_depth=True, depth_exp=1.0, texture_camera=None):
     """
     Render the scene. 
     
@@ -41,6 +41,10 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             torch.tensor([0.0],device=bg_color.device)
         ])
 
+    fx = fov2focal(viewpoint_camera.FoVx,viewpoint_camera.image_width)
+    fy = fov2focal(viewpoint_camera.FoVy,viewpoint_camera.image_height)
+    cx = viewpoint_camera.image_width/2
+    cy = viewpoint_camera.image_height/2
     raster_settings = GaussianRasterizationSettings(
         image_height=int(viewpoint_camera.image_height),
         image_width=int(viewpoint_camera.image_width),
@@ -50,6 +54,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         scale_modifier=scaling_modifier,
         viewmatrix=viewpoint_camera.world_view_transform,
         projmatrix=viewpoint_camera.full_proj_transform,
+        proj_param=torch.tensor([fx,fy,cx,cy]).cuda(),
         sh_degree=pc.active_sh_degree,
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
@@ -105,31 +110,63 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         shs = pc.get_features
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
-    rendered_image, radii = rasterizer(
-        means3D = means3D,
-        means2D = means2D,
-        shs = shs,
-        colors_precomp = colors_precomp,
-        opacities = opacity,
-        scales = scales,
-        rotations = rotations,
-        cov3D_precomp = cov3D_precomp)
+    if texture_camera is not None:
+        texture = torch.cat([
+            texture_camera.original_image,
+            texture_camera.rendered_depth
+        ])
+        rendered_image, radii = rasterizer(
+            means3D = means3D,
+            means2D = means2D,
+            shs = shs,
+            colors_precomp = colors_precomp,
+            opacities = opacity,
+            scales = scales,
+            rotations = rotations,
+            cov3D_precomp = cov3D_precomp,
+            texture=texture,
+            texture_proj_mat=texture_camera.full_proj_transform)
+        
+        render_texture = rendered_image[:3]
+        render_mask = rendered_image[3:4]#*torch.exp(pc.depth_scale)
+        
+        # render_depth.retain_grad()
+        # render_depth.requires_grad_(True)
 
-    render_rgb = rendered_image[:3]
-    render_depth = rendered_image[3:4]#*torch.exp(pc.depth_scale)
-    render_opacity = rendered_image[4:]#*torch.exp(pc.depth_scale)
+        # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
+        # They will be excluded from value updates used in the splitting criteria.
+        return {"render": render_texture,
+                "render_mask": render_mask,
+                "texture":texture,
+                "viewspace_points": screenspace_points,
+                "visibility_filter" : radii > 0,
+                "radii": radii}
+    else:
+        rendered_image, radii = rasterizer(
+            means3D = means3D,
+            means2D = means2D,
+            shs = shs,
+            colors_precomp = colors_precomp,
+            opacities = opacity,
+            scales = scales,
+            rotations = rotations,
+            cov3D_precomp = cov3D_precomp)
 
-    render_depth = render_depth/torch.clamp(render_opacity,0.05,10000)
+        render_rgb = rendered_image[:3]
+        render_depth = rendered_image[3:4]#*torch.exp(pc.depth_scale)
+        render_opacity = rendered_image[4:]#*torch.exp(pc.depth_scale)
+
+        render_depth = render_depth/torch.clamp(render_opacity,0.05,10000)
 
 
-    # render_depth.retain_grad()
-    # render_depth.requires_grad_(True)
+        # render_depth.retain_grad()
+        # render_depth.requires_grad_(True)
 
-    # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
-    # They will be excluded from value updates used in the splitting criteria.
-    return {"render": render_rgb,
-            "render_depth": render_depth,
-            "render_opacity": render_opacity,
-            "viewspace_points": screenspace_points,
-            "visibility_filter" : radii > 0,
-            "radii": radii}
+        # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
+        # They will be excluded from value updates used in the splitting criteria.
+        return {"render": render_rgb,
+                "render_depth": render_depth,
+                "render_opacity": render_opacity,
+                "viewspace_points": screenspace_points,
+                "visibility_filter" : radii > 0,
+                "radii": radii}

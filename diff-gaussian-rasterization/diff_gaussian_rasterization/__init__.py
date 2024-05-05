@@ -167,6 +167,7 @@ class GaussianRasterizationSettings(NamedTuple):
     campos : torch.Tensor
     prefiltered : bool
     debug : bool
+    proj_param: torch.Tensor
 
 class GaussianRasterizer(nn.Module):
     def __init__(self, raster_settings):
