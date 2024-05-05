@@ -31,7 +31,7 @@ def readImages(renders_dir, gt_dir, textured):
 
         fname = fname.split(".")[0]
 
-        if textured:
+        if "texture" in str(renders_dir):
             render = Image.open(renders_dir / f"{fname}_texture.png")
         else:
             render = Image.open(renders_dir / f"{fname}.png")
@@ -52,21 +52,26 @@ def evaluate(model_paths, textured):
 
     for scene_dir in model_paths:
         print("Scene:", scene_dir)
+            
         full_dict[scene_dir] = {}
         per_view_dict[scene_dir] = {}
-        full_dict_polytopeonly[scene_dir] = {}
-        per_view_dict_polytopeonly[scene_dir] = {}
-
+        
+        try:
+            with open(scene_dir + "/results.json", 'r') as fp:
+                full_dict[scene_dir] = json.load(fp)
+        except FileNotFoundError:
+            pass
+        
         test_dir = Path(scene_dir) / "test"
 
         for method in os.listdir(test_dir):
             print("Method:", method)
-
+            if method in full_dict[scene_dir]:
+                continue
+             
             full_dict[scene_dir][method] = {}
             per_view_dict[scene_dir][method] = {}
-            full_dict_polytopeonly[scene_dir][method] = {}
-            per_view_dict_polytopeonly[scene_dir][method] = {}
-
+            
             method_dir = test_dir / method
             gt_dir = method_dir/ "gt"
             renders_dir = method_dir / "renders"
