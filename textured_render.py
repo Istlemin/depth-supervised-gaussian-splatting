@@ -16,7 +16,7 @@ def textured_render(render_points,viewpoint_camera, texture_camera, texture_scal
     points_texture_camera = geom_transform_points(render_points, texture_camera.world_view_transform)
     texture_camera_depth = points_texture_camera[:,2]#.reshape((1,viewpoint_camera.image_height,viewpoint_camera.image_width))
     texture_coords = (texture_camera.proj_mat @ points_texture_camera.T).T
-    texture_coords = (texture_coords/ texture_coords[:,2].reshape((-1,1)))[:,:2]
+    texture_coords = (texture_coords/ (texture_coords[:,2].reshape((-1,1))+1e-9))[:,:2]
     
     texture_coords[:,0] = (texture_coords[:,0]+0.5-texture_camera.image_width/2)/(texture_camera.image_width/2)
     texture_coords[:,1] = (texture_coords[:,1]+0.5-texture_camera.image_height/2)/(texture_camera.image_height/2)
@@ -38,16 +38,17 @@ def textured_render(render_points,viewpoint_camera, texture_camera, texture_scal
     not_in_shadow = torch.exp(-shadowmap_diff**2/shadowmap_tol**2)
 
     #texture_coords = texture_coords.reshape((1,viewpoint_camera.image_height,viewpoint_camera.image_width,2))
-    #not_in_shadow = not_in_shadow & (texture_camera_depth>0.2) & (texture_coords[:,:,:,0]<1) & (texture_coords[:,:,:,0]>-1) & (texture_coords[:,:,:,1]>-1) & (texture_coords[:,:,:,1]<1)
+    in_frame = (texture_coords[:,0]<1) & (texture_coords[:,0]>-1) & (texture_coords[:,1]>-1) & (texture_coords[:,1]<1)
 
     tex_vec = texture_camera.camera_center - render_points
     view_vec = viewpoint_camera.camera_center - render_points
 
     eps = 1e-4
-    pixel_camera_score = ((tex_vec / (tex_vec.norm(dim=1).unsqueeze(1)+eps)) * (view_vec / (view_vec.norm(dim=1).unsqueeze(1)+eps))).sum(dim=1)**2 / (tex_vec.norm(dim=1)+eps)
+    pixel_camera_score = ((tex_vec / (tex_vec.norm(dim=1).unsqueeze(1)+eps)) * (view_vec / (view_vec.norm(dim=1).unsqueeze(1)+eps))).sum(dim=1)# / (tex_vec.norm(dim=1)+eps)
+    pixel_camera_score = pixel_camera_score*0+1/torch.norm(texture_camera.camera_center-viewpoint_camera.camera_center)
     #pixel_camera_score = pixel_camera_score.reshape((1,viewpoint_camera.image_height,viewpoint_camera.image_width))
     # print((texture_color*not_in_shadow).sum().item())
-    return texture_color, not_in_shadow, pixel_camera_score
+    return texture_color, not_in_shadow, in_frame.float(), pixel_camera_score
 
 import torch
 import math
@@ -61,7 +62,7 @@ def gaussian_kernel_1d(sigma: float, num_sigmas: float = 3.) -> torch.Tensor:
     return kernel.mul_(1 / kernel.sum())
 
 
-kernel_radius = 3
+kernel_radius = 2
 channels = 3
 vertical_kernel = torch.zeros((channels,channels,1,kernel_radius*2+1)).float()
 for i in range(channels):
@@ -83,7 +84,8 @@ def get_top_texture_cameras(viewpoint_camera, render_args, texture_cameras, num_
     # visible_texture_cameras = [viewpoint_camera]
     
     visible_texture_cameras.sort(key=(lambda cam: torch.norm(cam.camera_center-viewpoint_camera.camera_center)))
-    visible_texture_cameras = visible_texture_cameras[int(in_training):(num_texture_views)*2+int(in_training):2]
+    #visible_texture_cameras = visible_texture_cameras[int(in_training):(num_texture_views)*2+int(in_training):2]
+    visible_texture_cameras = visible_texture_cameras[int(in_training):]
     
     for camera in (visible_texture_cameras):
         if not hasattr(camera,"rendered_depth"):
@@ -124,20 +126,25 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
     
     texture_colors = []
     texture_masks = []
+    texture_in_frame = []
     texture_scores = []
 
     for i,texture_camera in enumerate(visible_texture_cameras):
         #print(texture_camera.colmap_id, exclude_texture_idx)
-        curr_texture_colors, curr_texture_mask,pixel_camera_score = textured_render(render_points,viewpoint_camera, texture_camera, texture_scale=texture_scale)
+        curr_texture_colors, curr_texture_mask,curr_texture_in_frame,pixel_camera_score = textured_render(render_points,viewpoint_camera, texture_camera, texture_scale=texture_scale)
 
         texture_colors.append(curr_texture_colors.reshape(3,viewpoint_camera.image_height,viewpoint_camera.image_width))
         texture_masks.append(curr_texture_mask.reshape(1,viewpoint_camera.image_height,viewpoint_camera.image_width))
+        texture_in_frame.append(curr_texture_in_frame.reshape(1,viewpoint_camera.image_height,viewpoint_camera.image_width))
         texture_scores.append(pixel_camera_score.reshape(1,viewpoint_camera.image_height,viewpoint_camera.image_width))
 
     texture_colors = torch.stack(texture_colors)
+    texture_in_frame = torch.stack(texture_in_frame)
     texture_masks = torch.stack(texture_masks)
     texture_scores = torch.stack(texture_scores)
-
+    texture_in_frame *= (render_pkg_view["render_opacity"]>0.1).unsqueeze(0)
+    texture_masks *= texture_in_frame
+    
     if blend_mode == "alpha":
         w = torch.zeros_like(texture_masks)
         T = torch.ones_like(texture_masks[0])
@@ -153,7 +160,7 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
         eps = 1e-10
         #texture_scores = torch.exp((texture_scores-0.5*(1-texture_masks)+0.5)*100)
         
-        texture_scores = texture_scores-1*(1-texture_masks)
+        texture_scores = texture_scores#-1*(1-texture_masks)
         if blend_mode=="scores_softmax":
             texture_scores = texture_scores-texture_scores.min()
             texture_scores = torch.exp(texture_scores*50)
@@ -174,24 +181,27 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
 
     #torch.nn.functional.conv2d(render_textured, )
     
-    opacity = render_pkg_view["render_opacity"]
-    render_textured[:,(opacity[0]<0.15)] *= opacity[(opacity<0.15)]
+    # opacity = render_pkg_view["render_opacity"]
+    # render_textured[:,(opacity[0]<0.15)] *= opacity[(opacity<0.15)]
     # render_pkg_view["render_opacity"]
     # render_textured *= (render_pkg_view["render_opacity"]>0.1)
     # render_textured_mask[render_pkg_view["render_opacity"]<=0.1] = 1
 
+    render_textured = render_textured*render_textured_mask + (1-render_textured_mask)*render_pkg_view["render"]#*torch.tensor([1.0,0.0,0.0]).cuda().reshape((3,1,1))
+    
     if blur_inpaint:
         eps = 1e-4
         extra_mask = blur(render_textured_mask.float())
-        extra = blur(render_textured) / torch.clip(extra_mask,eps,10000)
+        extra = blur(render_textured*render_textured_mask) / torch.clip(extra_mask,eps,10000)
         
-        render_textured =  render_textured + (~render_textured_mask) * extra * (extra_mask>eps)
-        render_textured_mask = render_textured_mask | (extra_mask>eps)
+        render_textured =  render_textured*render_textured_mask + (1-render_textured_mask) * extra * (extra_mask>eps)
+        #render_textured_mask = render_textured_mask | (extra_mask>eps)
         #print((render_textured).sum().item())
     
     return {
         "render_textured": render_textured,
         "render_textured_mask": render_textured_mask,
+        "render_textured_in_frame": 1-torch.prod(1-texture_in_frame.float(),dim=0),
         "texture_colors": texture_colors,
         "texture_masks": texture_masks, 
         "texture_images": [cam.learnable_image for cam in visible_texture_cameras],
@@ -238,30 +248,45 @@ def get_uv_function(pc, view_camera, texture_camera):
 
 def textured_render_per_gaussian(viewpoint_camera, texture_cameras, pc : GaussianModel, pipe, bg_color : torch.Tensor,in_training=False, blur_inpaint=False, texture_scale=0, blend_mode=None,num_texture_views=32):
     visible_texture_cameras = get_top_texture_cameras(viewpoint_camera,(pc,pipe,bg_color),texture_cameras,num_texture_views,in_training)
-    
+    #bg_color = bg_color*0+1
+    render_pkg = render(viewpoint_camera,pc,pipe,bg_color,render_depth=True)
     render_points = pc.get_xyz
 
     texture_colors = []
     texture_masks = []
 
     for i,texture_camera in enumerate(visible_texture_cameras):
-        #print(texture_camera.colmap_id, exclude_texture_idx)
-        curr_texture_colors, curr_texture_mask,_ = textured_render(render_points,viewpoint_camera, texture_camera, texture_scale=texture_scale)
+        curr_render_pkg = render(viewpoint_camera,pc,pipe,bg_color,texture_camera=texture_camera)
 
-        texture_colors.append(curr_texture_colors)
-        texture_masks.append(curr_texture_mask)
+        texture_colors.append(curr_render_pkg["render"]/(curr_render_pkg["render_mask"]+1e-9))
+        texture_masks.append(curr_render_pkg["render_mask"])
 
     texture_colors = torch.stack(texture_colors)
-    texture_masks = torch.stack(texture_masks)
+    texture_masks = (torch.stack(texture_masks)).float()
 
-    w = torch.zeros_like(texture_masks)
-    T = torch.ones_like(texture_masks[0])
+    blend_mode = "scores_softmax"
+
     render_textured_mask = 1 - torch.prod(1-texture_masks,dim=0)
-    
-    for i in range(len(visible_texture_cameras)):
-        w[i] = texture_masks[i] * T
-        T = T*(1-texture_masks[i])
+    if blend_mode=="alpha":
+        w = torch.zeros_like(texture_masks)
+        T = torch.ones_like(texture_masks[0])
         
-    colors = (texture_colors*w).sum(dim=0) + (1-render_textured_mask)*texture_colors[0]
-    
-    return render(viewpoint_camera, pc, pipe, bg_color,render_depth=True,override_color=colors[0,:,0,:].T)
+        for i in range(len(visible_texture_cameras)):
+            w[i] = texture_masks[i] * T
+            T = T*(1-texture_masks[i])
+        
+        colors = (texture_colors*w).sum(dim=0) + (1-render_textured_mask)*texture_colors[0]
+    else:
+        texture_scores = texture_masks/(torch.arange(2,len(texture_masks)+2,device=texture_masks.device).reshape((-1,1,1,1)))**0.5
+        if blend_mode=="scores_softmax":
+            texture_scores = texture_scores-texture_scores.min()
+            texture_scores = torch.exp(texture_scores*50)
+        else:
+            texture_scores = (texture_scores==(texture_scores.amax(dim=0).unsqueeze(0)))
+            
+        colors = (texture_colors * texture_scores).sum(dim=0) / (texture_scores.sum(dim=0)+1e-9)
+    return {
+        "render_textured": colors.reshape((3,viewpoint_camera.image_height,viewpoint_camera.image_width)),
+        "render_textured_mask": render_textured_mask.reshape((1,viewpoint_camera.image_height,viewpoint_camera.image_width)),
+        **render_pkg
+    }

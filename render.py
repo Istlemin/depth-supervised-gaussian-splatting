@@ -25,6 +25,7 @@ from gaussian_renderer import GaussianModel
 import cv2
 import numpy as np
 
+from utils.image_utils import psnr
 from utils.loss_utils import gaussian
 
 def render_set(model_path, name, iteration, views,texture_views,gaussians, pipeline, background, blend_mode, render_type):
@@ -40,6 +41,7 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
     with open(os.path.join(model_path, name, approach, "num_gaussians"),"w") as f:
         f.write(str(len(gaussians.get_xyz)))
 
+    psnrs = []
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         #import dill
 
@@ -66,11 +68,18 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
             else:
                 render_textured = rendering_pkg["render_textured"]
             
+            render_textured_mask = rendering_pkg["render_textured_mask"]
+            #psnrs.append(psnr(view.original_image*render_textured_mask, render_textured*render_textured_mask).mean().item())
+            psnrs.append(psnr(view.original_image, render_textured).mean().item())
+            print(psnrs[-1])
             #render_textured = rendering_pkg["render_textured"]
             torchvision.utils.save_image(render_textured, os.path.join(render_path, '{0:05d}'.format(idx) + "_texture.png"))
+            torchvision.utils.save_image(render_textured_mask, os.path.join(render_path, '{0:05d}'.format(idx) + "_mask.png"))
+            torchvision.utils.save_image(rendering_pkg["render_textured_in_frame"], os.path.join(render_path, '{0:05d}'.format(idx) + "_in_frame.png"))
             torchvision.utils.save_image(rendering_pkg["render_opacity"], os.path.join(render_path, '{0:05d}'.format(idx) + "_opacity.png"))
         elif render_type == "texture_per_gaussian":
             rendering_pkg = textured_render_per_gaussian(view, texture_views,gaussians, pipeline, background,in_training=(name=="train"))
+            torchvision.utils.save_image(rendering_pkg["render_textured"], os.path.join(render_path, '{0:05d}'.format(idx) + "_texture.png"))
             torchvision.utils.save_image(0.1*render(view, gaussians, pipeline, background,render_depth=True,depth_exp=1.0)["render_depth"], os.path.join(render_path, '{0:05d}'.format(idx) + "_depth1.0.png"))
         else:
             rendering_pkg = render(view, gaussians, pipeline, background,render_depth=True)
@@ -87,7 +96,8 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
         torchvision.utils.save_image(rendering_pkg["render_depth"]*0.1, os.path.join(render_path, '{0:05d}'.format(idx) + "_depth.png"))
         if view.depth is not None:
             torchvision.utils.save_image(view.depth*0.1, os.path.join(render_path, '{0:05d}'.format(idx) + "gtdepth.png"))
-
+    print("Mean PSNR:",np.mean(psnrs))
+    
 def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool,blend_mode, render_type):
     with torch.no_grad():
         gaussians = GaussianModel(dataset.sh_degree)
