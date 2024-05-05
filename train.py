@@ -510,8 +510,8 @@ if __name__ == "__main__":
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
-    test_iterations = list(range(0, 30000, 1000))
-    save_iterations = list(range(0, 30000, 1000))
+    test_iterations = list(range(0, 100000, 1000))
+    save_iterations = list(range(0, 100000, 1000))
 
     # Start GUI server, configure and run training
     network_gui.init(args.ip, args.port)
