@@ -1,38 +1,21 @@
-python train.py -s ../data/chair_background/ --model_path output/chair_background_slow --start_gaussians 5000 --densification_interval 2000 --densify_grad_threshold 0.0003 --max_gaussians 500000 --lambda_depth=0.0 --initialisation=depth --iterations 70000 --densify_until_iter 100000
-python train.py -s ../data/chair_background/ --model_path output/chair_background_slow_depth --start_gaussians 3000 --densification_interval 2000 --densify_grad_threshold 0.0003 --max_gaussians 500000 --lambda_depth=0.8 --initialisation=depth --iterations 70000 --densify_until_iter 100000
+scene="../data/chair_background2/";
+modelname="chair_background2_slow";
 
-python render.py --eval --model_path output/chair_background_slow/ --iteration 2000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 3000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 4000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 5000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 7000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 10000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 13000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 16000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 20000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 25000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 30000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 35000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 40000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 47000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 55000 --mode texture
-python render.py --eval --model_path output/chair_background_slow/ --iteration 70000 --mode texture
-python metrics.py --model_paths output/chair_background_slow/
+# python train.py -s $scene --model_path output/$modelname --start_gaussians 3000 --densification_interval 1000 --densify_grad_threshold 0.0003 --max_gaussians 500000 --lambda_depth=0.0 --initialisation=depth --iterations 30000 --densify_until_iter 100000
+# python train.py -s $scene --model_path output/$modelname_depth --start_gaussians 3000 --densification_interval 2000 --densify_grad_threshold 0.0003 --max_gaussians 500000 --lambda_depth=0.8 --initialisation=depth --iterations 30000 --densify_until_iter 100000
 
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 2000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 3000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 4000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 5000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 7000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 10000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 13000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 16000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 20000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 25000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 30000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 35000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 40000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 47000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 55000 --mode texture
-python render.py --eval --model_path output/chair_background_slow_depth/ --iteration 70000 --mode texture
-python metrics.py --model_paths output/chair_background_slow_depth/
+iterations=(2000 3000 4000 5000 7000 10000 13000 16000 20000 25000 30000);
+
+# for iteration in ${iterations[@]};
+#     do python render.py --eval --model_path output/$modelname/ --iteration $iteration;
+# done;
+for iteration in ${iterations[@]};
+    do python render.py --eval --model_path output/$modelname/ --iteration $iteration --mode texture;
+done;
+python metrics.py --model_paths output/$modelname/
+
+
+# for iteration in ${iterations[@]};
+#     do python render.py --eval --model_path output/$modelname_depth/ --iteration $iteration --mode texture;
+# done;
+# python metrics.py --model_paths output/$modelname_depth/
