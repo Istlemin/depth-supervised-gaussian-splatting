@@ -127,8 +127,22 @@ class GaussianModel:
     def create_from_pcd(self, pcd : BasicPointCloud, spatial_lr_scale : float, max_gaussians=10000000):
         points = pcd.points
         colors = pcd.colors
-        num_gaussians = min(max_gaussians, len(points))
+        num_gaussians = min(max_gaussians*10, len(points))
         subset = random.sample(list(range(len(points))),num_gaussians)
+        points = points[subset]
+        colors = colors[subset]
+        
+        num_gaussians = min(max_gaussians, len(points))
+        
+        import open3d as o3d
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points.numpy())
+        indices = np.zeros_like(points.numpy())
+        indices[:,0] = np.arange(len(indices))
+        pcd.colors = o3d.utility.Vector3dVector(indices)
+        pcd2 = pcd.farthest_point_down_sample(num_gaussians)
+        
+        subset = np.asarray(pcd2.colors)[:,0].astype(np.int32)
         points = points[subset]
         colors = colors[subset]
 
