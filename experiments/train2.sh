@@ -18,4 +18,7 @@ python metrics.py --model_paths output/${modelname}/
 for iteration in ${iterations[@]};
     do python render.py --eval --model_path output/${modelname}_depth/ --iteration $iteration --mode texture;
 done;
+for iteration in ${iterations[@]};
+    do python render.py --eval --model_path output/${modelname}_depth/ --iteration $iteration --mode texture;
+done;
 python metrics.py --model_paths output/${modelname}_depth/
