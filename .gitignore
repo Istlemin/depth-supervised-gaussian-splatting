@@ -22,3 +22,8 @@ log
 
 diff_gaussian_rasterization.egg-info
 diff-gaussian-rasterization_modified
+
+*.mp4
+log*
+figures/*
+*.dds
