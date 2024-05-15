@@ -344,7 +344,22 @@ def readNerfSyntheticInfo(path, white_background, num_train_images, eval, extens
     train_idx = [int(round(x)) for x in np.linspace(0,len(cam_infos)-1,num_train_images)]
 
     train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in train_idx]
-    test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx not in train_idx]
+    
+    ood_test_angles = [
+        "0004",
+        "0008",
+        "0016",
+        "0018",
+        "0026",
+        "0028",
+        "0034",
+        "0040",
+        "0046",
+        "0061",
+        "0069",
+        "0097"
+    ]
+    test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx not in train_idx and c.image_name not in ood_test_angles]
     
     
     nerf_normalization = getNerfppNorm(train_cam_infos)

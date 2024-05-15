@@ -116,7 +116,7 @@ def training(
             viewpoint_stack = scene.getTrainCameras().copy()
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
         
-        # selected_cameras = []
+        # # selected_cameras = []
         # for camera in scene.getTrainCameras():
         #     #print(camera.colmap_id)
         #     # if camera.colmap_id in [0,10]:
@@ -144,7 +144,7 @@ def training(
             scale=(iteration+4)%5
             #scale = 0
             
-            #scale=3
+            scale=(iteration+1)%2
             
             render_pkg = textured_render_multicam(
                 viewpoint_cam,
@@ -152,7 +152,7 @@ def training(
                 gaussians,
                 pipe,
                 background,
-                exclude_texture_idx=viewpoint_cam.colmap_id,
+                in_training=True,
                 texture_scale=scale,#(3-(iteration//600)),
                 blend_mode="alpha",#"scores_softmax"
                 num_texture_views=8
@@ -178,23 +178,27 @@ def training(
             render_pkg["render_depth"].retain_grad()
             #render_pkg["render"].retain_grad()
 
-            gt_image = viewpoint_cam.image_scales[scale]
-            #gt_image = viewpoint_cam.image_scales[0]
+            gt_image_rz = viewpoint_cam.image_scales[scale]
+            #gt_image_rz = viewpoint_cam.image_scales[0]
             
-            images = torch.nn.functional.interpolate(images, (gt_image.shape[1],gt_image.shape[2]), mode='area')
-            masks = torch.nn.functional.interpolate(masks, (gt_image.shape[1],gt_image.shape[2]), mode='area')
+            images = torch.nn.functional.interpolate(images, (gt_image_rz.shape[1],gt_image_rz.shape[2]), mode='area')
+            masks = torch.nn.functional.interpolate(masks, (gt_image_rz.shape[1],gt_image_rz.shape[2]), mode='area')
             
-            gt_image = gt_image.unsqueeze(0)
+            gt_image_rz = gt_image_rz.unsqueeze(0)
             loss = 0
-            outside_loss = l2_loss((masks*images)*(gt_image==0), torch.zeros_like(masks))*1000
-            loss += outside_loss
-            #loss += l2_loss((masks.detach()*images)[:,:,:], (masks.detach()*gt_image)[:,:,:])*1
-            #loss += ((gt_image<0.01)*images)
+            # outside_loss = l2_loss((masks*images)*(gt_image==0), torch.zeros_like(masks))*1000
+            # loss += outside_loss
+            
+            #loss += l2_loss((masks.detach()*images)[:,:,:], (masks.detach()*gt_image_rz)[:,:,:])
+            loss += l2_loss(masks*torch.maximum(torch.zeros_like(images),(1-abs(images-gt_image_rz).detach()*10)),torch.ones_like(masks))
+            
+            #loss += l2_loss((images)[:,:,:], (gt_image_rz)[:,:,:])*1
+            
             gt_image = viewpoint_cam.image_scales[0]
             Ll1 = l1_loss(render_pkg["render_textured"], gt_image)
             
-            blend_loss = l2_loss((render_pkg["render_textured_mask"].detach()*render_pkg["render_textured"])[:,:,:], (render_pkg["render_textured_mask"].detach()*gt_image)[:,:,:])
-            loss += blend_loss*10
+            # blend_loss = l2_loss((render_pkg["render_textured_mask"].detach()*render_pkg["render_textured"])[:,:,:], (render_pkg["render_textured_mask"].detach()*gt_image)[:,:,:])
+            # loss += blend_loss
             #loss += l2_loss((images)[:,:,:], (gt_image)[:,:,:])*10
             #loss += ((render_pkg["render_opacity"] - 1) ** 2).mean() * 100
             #loss += l2_loss(masks,torch.ones_like(masks))*0.01
@@ -236,20 +240,20 @@ def training(
                 torchvision.utils.save_image(render_pkg["render_textured"], "tmp/img.png")
                 torchvision.utils.save_image(render_pkg["render_textured"]*render_pkg["render_textured_mask"], "tmp/img_masked.png")
                 torchvision.utils.save_image(masks.float(), "tmp/mask.png")
-                torchvision.utils.save_image((masks*images)*(gt_image==0), "tmp/outside.png")
+                torchvision.utils.save_image((masks*images), "tmp/outside.png")
                 torchvision.utils.save_image(
-                    gt_image.broadcast_to(images.shape)*masks, "tmp/gt_image_masked.png"
+                    gt_image_rz.broadcast_to(images.shape)*masks, "tmp/gt_image_masked.png"
                 )
                 torchvision.utils.save_image(
-                    gt_image.broadcast_to(images.shape), "tmp/gt_images.png"
+                    gt_image_rz.broadcast_to(images.shape), "tmp/gt_images.png"
                 )
                 torchvision.utils.save_image(
-                    gt_image, "tmp/gt_image.png"
+                    gt_image_rz, "tmp/gt_image.png"
                 )
                 torchvision.utils.save_image(
                     render_pkg["render_depth"].grad*10000+0.5, "tmp/depth_grad.png"
                 )
-                print(l2_loss((render_pkg["render_textured"])[:,:,:], (gt_image)[:,:,:])*5,outside_loss)
+                print(l2_loss((render_pkg["render_textured"])[:,:,:], (gt_image)[:,:,:])*5)#,outside_loss)
             else:
                 torchvision.utils.save_image(image, "tmp/img.png")
                 torchvision.utils.save_image(

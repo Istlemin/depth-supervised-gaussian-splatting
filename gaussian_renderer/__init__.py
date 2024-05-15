@@ -157,7 +157,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         render_opacity = rendered_image[4:]#*torch.exp(pc.depth_scale)
 
         render_depth = render_depth/torch.clamp(render_opacity,0.05,10000)
-
+        render_depth = render_depth**(1/depth_exp)
 
         # render_depth.retain_grad()
         # render_depth.requires_grad_(True)

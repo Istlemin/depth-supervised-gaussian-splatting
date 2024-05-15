@@ -59,37 +59,46 @@ def gaussian_kernel_1d(sigma: float, num_sigmas: float = 3.) -> torch.Tensor:
     support = torch.arange(-radius, radius + 1, dtype=torch.float)
     kernel = torch.distributions.Normal(loc=0, scale=sigma).log_prob(support).exp_()
     # Ensure kernel weights sum to 1, so that image brightness is not altered
-    return kernel.mul_(1 / kernel.sum())
+    kernel =  torch.maximum(torch.ones_like(kernel)*1e-6, kernel)
+    return kernel
 
 
-kernel_radius = 2
-channels = 3
-vertical_kernel = torch.zeros((channels,channels,1,kernel_radius*2+1)).float()
-for i in range(channels):
-    vertical_kernel[i,i,0,:] = gaussian_kernel_1d(1,kernel_radius)
-vertical_kernel = vertical_kernel.cuda()
-horizontal_kernel = torch.zeros((channels,channels,kernel_radius*2+1,1)).float()
-for i in range(channels):
-    horizontal_kernel[i,i,:,0] = gaussian_kernel_1d(1,kernel_radius)
-horizontal_kernel = horizontal_kernel.cuda()
 
-def blur(img):
+def blur(img,kernel_radius=2):
     channels = img.shape[-3]
+    vertical_kernel = torch.zeros((channels,channels,1,kernel_radius*2+1)).float()
+    for i in range(channels):
+        vertical_kernel[i,i,0,:] = gaussian_kernel_1d(1,kernel_radius)
+    vertical_kernel = vertical_kernel.cuda()
+    horizontal_kernel = torch.zeros((channels,channels,kernel_radius*2+1,1)).float()
+    for i in range(channels):
+        horizontal_kernel[i,i,:,0] = gaussian_kernel_1d(1,kernel_radius)
+    horizontal_kernel = horizontal_kernel.cuda()
+
     img2 = torch.nn.functional.conv2d(img.unsqueeze(0),vertical_kernel[:channels,:channels],padding='same')
     img3 = torch.nn.functional.conv2d(img2,horizontal_kernel[:channels,:channels],padding='same')
     return img3[0]
 
+def blur_inpaint(render_textured,render_textured_mask,kernel_radius):
+    eps = 1e-7
+    extra_mask = blur(render_textured_mask.float(),kernel_radius)
+    extra = blur(render_textured*render_textured_mask,kernel_radius) / torch.clip(extra_mask,eps,10000)
+    
+    render_textured = render_textured*render_textured_mask + (1-render_textured_mask) * extra * (extra_mask>eps)
+    render_textured_mask = 1-(1-render_textured_mask) *  (1-(extra_mask>eps).float())
+    return render_textured, render_textured_mask
+    
 def get_top_texture_cameras(viewpoint_camera, render_args, texture_cameras, num_texture_views,in_training):
     visible_texture_cameras = texture_cameras[:]
     # visible_texture_cameras = [viewpoint_camera]
     
     visible_texture_cameras.sort(key=(lambda cam: torch.norm(cam.camera_center-viewpoint_camera.camera_center)))
-    #visible_texture_cameras = visible_texture_cameras[int(in_training):(num_texture_views)*2+int(in_training):2]
-    visible_texture_cameras = visible_texture_cameras[int(in_training):]
+    visible_texture_cameras = visible_texture_cameras[int(in_training):(num_texture_views)+int(in_training)]
+    #visible_texture_cameras = visible_texture_cameras[int(in_training):]
     
     for camera in (visible_texture_cameras):
-        if not hasattr(camera,"rendered_depth"):
-            camera.rendered_depth = render(camera, *render_args)["render_depth"]
+        #if not hasattr(camera,"rendered_depth"):
+        camera.rendered_depth = render(camera, *render_args)["render_depth"]
         camera.rendered_depth_scales = [camera.rendered_depth]
         for _ in range(5):
             #print(camera.rendered_depth.shape)
@@ -99,7 +108,7 @@ def get_top_texture_cameras(viewpoint_camera, render_args, texture_cameras, num_
     
     return visible_texture_cameras
 
-def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianModel, pipe, bg_color : torch.Tensor,in_training=False, blur_inpaint=False, texture_scale=0, blend_mode=None,num_texture_views=32):
+def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianModel, pipe, bg_color : torch.Tensor,in_training=False, texture_scale=0, blend_mode=None,num_texture_views=100):
     render_pkg_view = render(viewpoint_camera, pc, pipe, bg_color)
 
     render_textured = torch.zeros_like(viewpoint_camera.original_image)
@@ -138,12 +147,14 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
         texture_in_frame.append(curr_texture_in_frame.reshape(1,viewpoint_camera.image_height,viewpoint_camera.image_width))
         texture_scores.append(pixel_camera_score.reshape(1,viewpoint_camera.image_height,viewpoint_camera.image_width))
 
+    
     texture_colors = torch.stack(texture_colors)
     texture_in_frame = torch.stack(texture_in_frame)
     texture_masks = torch.stack(texture_masks)
     texture_scores = torch.stack(texture_scores)
     texture_in_frame *= (render_pkg_view["render_opacity"]>0.1).unsqueeze(0)
     texture_masks *= texture_in_frame
+    texture_scores *= texture_masks
     
     if blend_mode == "alpha":
         w = torch.zeros_like(texture_masks)
@@ -154,7 +165,7 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
             w[i] = texture_masks[i] * T
             T = T*(1-texture_masks[i])
             
-        render_textured = (texture_colors*w).sum(dim=0) + (1-render_textured_mask)*texture_colors[0]
+        render_textured = (texture_colors*w).sum(dim=0)# + (1-render_textured_mask)*texture_colors[0]
         
     else:
         eps = 1e-10
@@ -163,7 +174,7 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
         texture_scores = texture_scores#-1*(1-texture_masks)
         if blend_mode=="scores_softmax":
             texture_scores = texture_scores-texture_scores.min()
-            texture_scores = torch.exp(texture_scores*50)
+            texture_scores = torch.exp(texture_scores*4)
         else:
             texture_scores = (texture_scores==(texture_scores.amax(dim=0).unsqueeze(0)))
             
@@ -187,18 +198,23 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
     # render_textured *= (render_pkg_view["render_opacity"]>0.1)
     # render_textured_mask[render_pkg_view["render_opacity"]<=0.1] = 1
 
-    render_textured = render_textured*render_textured_mask + (1-render_textured_mask)*render_pkg_view["render"]#*torch.tensor([1.0,0.0,0.0]).cuda().reshape((3,1,1))
-    
-    if blur_inpaint:
-        eps = 1e-4
-        extra_mask = blur(render_textured_mask.float())
-        extra = blur(render_textured*render_textured_mask) / torch.clip(extra_mask,eps,10000)
-        
-        render_textured =  render_textured*render_textured_mask + (1-render_textured_mask) * extra * (extra_mask>eps)
-        #render_textured_mask = render_textured_mask | (extra_mask>eps)
+    #render_textured = render_textured*render_textured_mask + (1-render_textured_mask)*render_pkg_view["render"]#*torch.tensor([1.0,0.0,0.0]).cuda().reshape((3,1,1))
+
+    before_blend = render_textured.clone()
+    before_blend_mask = render_textured_mask.clone()
+    before_blend *= (before_blend_mask>0.5)
+    if not in_training:
+        render_textured_mask = (render_textured_mask>0.5).float()
+        render_textured = render_textured*render_textured_mask
+        render_textured, render_textured_mask = blur_inpaint(render_textured, render_textured_mask,2)
+        render_textured, render_textured_mask = blur_inpaint(render_textured, render_textured_mask,5)
+        render_textured, render_textured_mask = blur_inpaint(render_textured, render_textured_mask,10)
+        render_textured, render_textured_mask = blur_inpaint(render_textured, render_textured_mask,100)
         #print((render_textured).sum().item())
     
     return {
+        "before_blend": before_blend,
+        "before_blend_mask": before_blend_mask,
         "render_textured": render_textured,
         "render_textured_mask": render_textured_mask,
         "render_textured_in_frame": 1-torch.prod(1-texture_in_frame.float(),dim=0),
@@ -246,7 +262,7 @@ def get_uv_function(pc, view_camera, texture_camera):
     
     
 
-def textured_render_per_gaussian(viewpoint_camera, texture_cameras, pc : GaussianModel, pipe, bg_color : torch.Tensor,in_training=False, blur_inpaint=False, texture_scale=0, blend_mode=None,num_texture_views=32):
+def textured_render_per_gaussian(viewpoint_camera, texture_cameras, pc : GaussianModel, pipe, bg_color : torch.Tensor,in_training=False, texture_scale=0, blend_mode=None,num_texture_views=100):
     visible_texture_cameras = get_top_texture_cameras(viewpoint_camera,(pc,pipe,bg_color),texture_cameras,num_texture_views,in_training)
     #bg_color = bg_color*0+1
     render_pkg = render(viewpoint_camera,pc,pipe,bg_color,render_depth=True)
@@ -275,16 +291,25 @@ def textured_render_per_gaussian(viewpoint_camera, texture_cameras, pc : Gaussia
             w[i] = texture_masks[i] * T
             T = T*(1-texture_masks[i])
         
-        colors = (texture_colors*w).sum(dim=0) + (1-render_textured_mask)*texture_colors[0]
+        colors = (texture_colors*w).sum(dim=0)/(render_textured_mask+1e9)
     else:
         texture_scores = texture_masks/(torch.arange(2,len(texture_masks)+2,device=texture_masks.device).reshape((-1,1,1,1)))**0.5
+        texture_scores -= (texture_masks<1e-4)*100
+        
         if blend_mode=="scores_softmax":
-            texture_scores = texture_scores-texture_scores.min()
+            texture_scores = texture_scores#-texture_scores.min()
             texture_scores = torch.exp(texture_scores*50)
         else:
             texture_scores = (texture_scores==(texture_scores.amax(dim=0).unsqueeze(0)))
             
         colors = (texture_colors * texture_scores).sum(dim=0) / (texture_scores.sum(dim=0)+1e-9)
+        
+    render_textured = colors
+    render_textured_mask = (render_textured_mask>0.2).float()
+    render_textured = render_textured*render_textured_mask
+    render_textured, render_textured_mask = blur_inpaint(render_textured, render_textured_mask,2)
+    render_textured, render_textured_mask = blur_inpaint(render_textured, render_textured_mask,5)
+    
     return {
         "render_textured": colors.reshape((3,viewpoint_camera.image_height,viewpoint_camera.image_width)),
         "render_textured_mask": render_textured_mask.reshape((1,viewpoint_camera.image_height,viewpoint_camera.image_width)),

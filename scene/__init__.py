@@ -52,6 +52,7 @@ class Scene:
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = readNerfSyntheticInfo(args.source_path, args.white_background, args.num_train_images, args.eval)
         else:
+            print(args.source_path)
             assert False, "Could not recognize scene type!"
 
         if not self.loaded_iter:

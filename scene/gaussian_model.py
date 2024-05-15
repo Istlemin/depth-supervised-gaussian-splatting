@@ -11,7 +11,7 @@
 
 import torch
 import numpy as np
-from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
+from utils.general_utils import farthest_point_down_sample, inverse_sigmoid, get_expon_lr_func, build_rotation
 from torch import nn
 import os
 from utils.system_utils import mkdir_p
@@ -134,15 +134,7 @@ class GaussianModel:
         
         num_gaussians = min(max_gaussians, len(points))
         
-        import open3d as o3d
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points.numpy())
-        indices = np.zeros_like(points.numpy())
-        indices[:,0] = np.arange(len(indices))
-        pcd.colors = o3d.utility.Vector3dVector(indices)
-        pcd2 = pcd.farthest_point_down_sample(num_gaussians)
-        
-        subset = np.asarray(pcd2.colors)[:,0].astype(np.int32)
+        subset = farthest_point_down_sample(points, num_gaussians)
         points = points[subset]
         colors = colors[subset]
 

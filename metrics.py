@@ -25,10 +25,10 @@ def readImages(renders_dir, gt_dir, textured):
     renders = []
     gts = []
     image_names = []
+    print(renders_dir)
     for fname in os.listdir(renders_dir):
         if "_" in fname or "depth" in fname:
             continue
-
         fname = fname.split(".")[0]
 
         if "texture" in str(renders_dir):
@@ -85,7 +85,7 @@ def evaluate(model_paths, textured):
                 ssims.append(ssim(renders[idx], gts[idx]))
                 psnrs.append(psnr(renders[idx], gts[idx]))
                 lpipss.append(lpips(renders[idx], gts[idx], net_type='vgg'))
-
+    
             print("  SSIM : {:>12.7f}".format(torch.tensor(ssims).mean(), ".5"))
             print("  PSNR : {:>12.7f}".format(torch.tensor(psnrs).mean(), ".5"))
             print("  LPIPS: {:>12.7f}".format(torch.tensor(lpipss).mean(), ".5"))

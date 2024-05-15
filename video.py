@@ -17,7 +17,7 @@ import os
 from tqdm import tqdm
 from os import makedirs
 from gaussian_renderer import render
-from textured_render import prerender_depth, textured_render_multicam
+from textured_render import prerender_depth, textured_render_multicam, textured_render_per_gaussian
 import torchvision
 from utils.general_utils import safe_state
 from argparse import ArgumentParser
@@ -28,6 +28,7 @@ import numpy as np
 from scene.cameras import MiniCam
 import math
 import glm
+import copy
 
 def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, output:Path,blend_mode, render_type):
     with torch.no_grad():
@@ -41,10 +42,10 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
 
         prerender_depth(scene.getTrainCameras(), gaussians, pipeline, background)
 
-        view = scene.getTrainCameras()[0]
+        view = copy.deepcopy(scene.getTrainCameras()[0])
         radius = np.linalg.norm(view.camera_center.cpu())
-        for i in range(100):
-            angle = i*0.03
+        for i in tqdm(range(200)):
+            angle = i*0.01
             cam_pos = np.array([math.cos(angle),math.sin(angle),-0.5])
             up = np.array([0,0,-1]).astype(float)
             
@@ -63,6 +64,8 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
                 background,
                 blend_mode=blend_mode
             )
+            
+            #rendering_pkg = textured_render_per_gaussian(view, scene.getTrainCameras(),gaussians, pipeline, background,in_training=False)
             torchvision.utils.save_image(
                 rendering_pkg["render_textured"],
                 output/f"{i}.png"

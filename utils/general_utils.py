@@ -148,3 +148,16 @@ def read_depth_exr_file(filepath: Path):
     width = exrfile.header()['displayWindow'].max.x + 1 - exrfile.header()['displayWindow'].min.x
     depth_map = np.reshape(depth_vector, (height, width))
     return depth_map
+
+import open3d as o3d
+
+def farthest_point_down_sample(points, num):
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points.numpy())
+    indices = np.zeros_like(points.numpy())
+    indices[:,0] = np.arange(len(indices))
+    pcd.colors = o3d.utility.Vector3dVector(indices)
+    pcd2 = pcd.farthest_point_down_sample(min(num, len(points)))
+    
+    subset = np.asarray(pcd2.colors)[:,0].astype(np.int32)
+    return subset
