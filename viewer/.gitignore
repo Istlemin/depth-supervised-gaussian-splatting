@@ -1,9 +1,0 @@
-__pycache__
-*.png
-!teaser.png
-*.npz
-*.ini
-*.dump
-_example.py
-text.py
-toy_cuda_gs.py

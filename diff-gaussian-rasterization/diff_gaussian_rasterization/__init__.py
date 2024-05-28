@@ -18,6 +18,25 @@ def cpu_deep_copy_tuple(input_tuple):
     copied_tensors = [item.cpu().clone() if isinstance(item, torch.Tensor) else item for item in input_tuple]
     return tuple(copied_tensors)
 
+
+def get_normal(scale, q):
+    local_normal = (scale==torch.amin(scale,dim=1).reshape((-1,1))).float()
+    
+    r = q[:,0]
+    x = q[:,1]
+    y = q[:,2]
+    z = q[:,3]
+
+    R = torch.stack([
+        1 - 2 * (y * y + z * z), 2 * (x * y - r * z), 2 * (x * z + r * y),
+        2 * (x * y + r * z), 1 - 2 * (x * x + z * z), 2 * (y * z - r * x),
+        2 * (x * z - r * y), 2 * (y * z + r * x), 1 - 2 * (x * x + y * y)
+    ],dim=1).reshape((-1,3,3))
+
+    normals = (torch.bmm(local_normal.reshape((-1,1,3)), R)).reshape((-1,3))
+    return normals/normals.norm(dim=1).unsqueeze(1)
+
+
 def rasterize_gaussians(
     means3D,
     means2D,
@@ -28,9 +47,15 @@ def rasterize_gaussians(
     rotations,
     cov3Ds_precomp,
     raster_settings,
+    texture,
+    texture_proj_mat
 ):
+    normals = get_normal(scales,rotations)
     return _RasterizeGaussians.apply(
         means3D,
+        normals,
+        texture,
+        texture_proj_mat,
         means2D,
         sh,
         colors_precomp,
@@ -46,6 +71,9 @@ class _RasterizeGaussians(torch.autograd.Function):
     def forward(
         ctx,
         means3D,
+        normals,
+        texture,
+        texture_proj_mat,
         means2D,
         sh,
         colors_precomp,
@@ -55,11 +83,17 @@ class _RasterizeGaussians(torch.autograd.Function):
         cov3Ds_precomp,
         raster_settings,
     ):
-
+        # import matplotlib.pyplot as plt
+        # plt.imshow(texture.cpu().detach().permute((1,2,0)))
+        # print(texture.min(),texture.max())
         # Restructure arguments the way that the C++ lib expects them
         args = (
             raster_settings.bg, 
             means3D,
+            normals,
+            texture,
+            texture_proj_mat,
+            raster_settings.proj_param,
             colors_precomp,
             opacities,
             scales,
@@ -163,11 +197,11 @@ class GaussianRasterizationSettings(NamedTuple):
     scale_modifier : float
     viewmatrix : torch.Tensor
     projmatrix : torch.Tensor
+    proj_param: torch.Tensor
     sh_degree : int
     campos : torch.Tensor
     prefiltered : bool
     debug : bool
-    proj_param: torch.Tensor
 
 class GaussianRasterizer(nn.Module):
     def __init__(self, raster_settings):
@@ -185,7 +219,7 @@ class GaussianRasterizer(nn.Module):
             
         return visible
 
-    def forward(self, means3D, means2D, opacities, shs = None, colors_precomp = None, scales = None, rotations = None, cov3D_precomp = None):
+    def forward(self, means3D, means2D, opacities, texture=None, texture_proj_mat=None, shs = None, colors_precomp = None, scales = None, rotations = None, cov3D_precomp = None):
         
         raster_settings = self.raster_settings
 
@@ -206,6 +240,11 @@ class GaussianRasterizer(nn.Module):
             rotations = torch.Tensor([])
         if cov3D_precomp is None:
             cov3D_precomp = torch.Tensor([])
+            
+        if texture is None:
+            texture = torch.tensor([-1.0]).cuda()
+        if texture_proj_mat is None:
+            texture_proj_mat = torch.Tensor([])
 
         # Invoke C++/CUDA rasterization routine
         return rasterize_gaussians(
@@ -218,5 +257,7 @@ class GaussianRasterizer(nn.Module):
             rotations,
             cov3D_precomp,
             raster_settings, 
+            texture,
+            texture_proj_mat
         )
 

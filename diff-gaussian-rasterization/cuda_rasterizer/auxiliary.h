@@ -76,6 +76,14 @@ __forceinline__ __device__ float4 transformPoint4x4(const float3& p, const float
 	return transformed;
 }
 
+__forceinline__ __device__ float3 transformPoint4x4_proj(const float3& p, const float* matrix)
+{
+	float4 p_hom = transformPoint4x4(p, matrix);
+	float p_w = 1.0f / (p_hom.w + 0.0000001f);
+	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z };
+	return p_proj;
+}
+
 __forceinline__ __device__ float3 transformVec4x3(const float3& p, const float* matrix)
 {
 	float3 transformed = {
@@ -96,6 +104,11 @@ __forceinline__ __device__ float3 transformVec4x3Transpose(const float3& p, cons
 	return transformed;
 }
 
+__forceinline__ __device__ float3 transformPoint4x3Inverse(const float3& p, const float* matrix)
+{
+	float3 x = {p.x - matrix[12],p.y - matrix[13],p.z - matrix[14]}; 
+	return transformVec4x3Transpose(x,matrix);
+}
 __forceinline__ __device__ float dnormvdz(float3 v, float3 dv)
 {
 	float sum2 = v.x * v.x + v.y * v.y + v.z * v.z;
@@ -131,6 +144,17 @@ __forceinline__ __device__ float4 dnormvdv(float4 v, float4 dv)
 	return dnormvdv;
 }
 
+__forceinline__ __device__ float dot3(float3 p,float3 q)
+{
+	return p.x*q.x+p.y*q.y+p.z*q.z;
+}
+
+__forceinline__ __device__ float3 normalize3(float3 p)
+{
+	float d = sqrt(dot3(p,p));
+	return {p.x/d,p.y/d,p.z/d};
+}
+
 __forceinline__ __device__ float sigmoid(float x)
 {
 	return 1.0f / (1.0f + expf(-x));
@@ -146,9 +170,9 @@ __forceinline__ __device__ bool in_frustum(int idx,
 	float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
 
 	// Bring points to screen space
-	float4 p_hom = transformPoint4x4(p_orig, projmatrix);
-	float p_w = 1.0f / (p_hom.w + 0.0000001f);
-	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
+	// float4 p_hom = transformPoint4x4(p_orig, projmatrix);
+	// float p_w = 1.0f / (p_hom.w + 0.0000001f);
+	//float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
 	p_view = transformPoint4x3(p_orig, viewmatrix);
 
 	if (p_view.z <= 0.2f)// || ((p_proj.x < -1.3 || p_proj.x > 1.3 || p_proj.y < -1.3 || p_proj.y > 1.3)))

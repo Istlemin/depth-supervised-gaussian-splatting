@@ -162,6 +162,8 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 	obtain(chunk, geom.cov3D, P * 6, 128);
 	obtain(chunk, geom.conic_opacity, P, 128);
 	obtain(chunk, geom.rgb, P * 3, 128);
+	obtain(chunk, geom.world_normal, P * 3, 128);
+	obtain(chunk, geom.world_center, P * 3, 128);
 	obtain(chunk, geom.tiles_touched, P, 128);
 	cub::DeviceScan::InclusiveSum(nullptr, geom.scan_size, geom.tiles_touched, geom.tiles_touched, P);
 	obtain(chunk, geom.scanning_space, geom.scan_size, 128);
@@ -203,6 +205,10 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* background,
 	const int width, int height,
 	const float* means3D,
+	const float* normals,
+	const float* texture,
+	const float* texture_proj_mat,
+	const float* proj_param,
 	const float* shs,
 	const float* colors_precomp,
 	const float* opacities,
@@ -243,6 +249,9 @@ int CudaRasterizer::Rasterizer::forward(
 	{
 		throw std::runtime_error("For non-RGB, provide precomputed Gaussian colors!");
 	}
+
+	geomState.world_center = (float*)means3D;
+	geomState.world_normal = (float*)normals;
 
 	// Run preprocessing per-Gaussian (transformation, bounding, conversion of SHs to RGB)
 	CHECK_CUDA(FORWARD::preprocess(
@@ -318,13 +327,20 @@ int CudaRasterizer::Rasterizer::forward(
 	CHECK_CUDA(, debug)
 
 	// Let each tile blend its range of Gaussians independently in parallel
-	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
+	//const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
+	const float* feature_ptr = colors_precomp;
 	CHECK_CUDA(FORWARD::render(
 		tile_grid, block,
 		imgState.ranges,
 		binningState.point_list,
 		width, height,
 		geomState.means2D,
+		geomState.world_normal,
+		geomState.world_center,
+		texture,
+		texture_proj_mat,
+		viewmatrix,
+		proj_param,
 		feature_ptr,
 		geomState.conic_opacity,
 		imgState.accum_alpha,

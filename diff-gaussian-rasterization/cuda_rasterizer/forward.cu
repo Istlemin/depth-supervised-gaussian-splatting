@@ -265,6 +265,12 @@ renderCUDA(
 	const uint32_t* __restrict__ point_list,
 	int W, int H,
 	const float2* __restrict__ points_xy_image,
+	const float* __restrict__ world_normal,
+	const float* __restrict__ world_center,
+	const float* __restrict__ texture,
+	const float* __restrict__ texture_proj_mat,
+	const float* __restrict__ view_mat,
+	const float* __restrict__ proj_param,
 	const float* __restrict__ features,
 	const float4* __restrict__ conic_opacity,
 	float* __restrict__ final_T,
@@ -341,6 +347,10 @@ renderCUDA(
 			// and its exponential falloff from mean.
 			// Avoid numerical instabilities (see paper appendix). 
 			float alpha = min(0.99f, con_o.w * exp(power));
+			// if(alpha>0.1f){
+			// 	alpha = 0.99f;
+			// }
+
 			if (alpha < 1.0f / 255.0f)
 				continue;
 			float test_T = T * (1 - alpha);
@@ -350,10 +360,65 @@ renderCUDA(
 				continue;
 			}
 
-			// Eq. (3) from 3D Gaussian splatting paper.
-			for (int ch = 0; ch < CHANNELS; ch++)
-				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
+			if(texture[0]<0){
+				for (int ch = 0; ch < CHANNELS; ch++)
+					C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
+			} else{
+				int idx = collected_id[j];
+				float3 p_world = { world_center[3 * idx], world_center[3 * idx + 1], world_center[3 * idx + 2] };
+				//float3 p_proj = transformPoint4x4_proj(p_world, texture_proj_mat);
+				float3 normal_world = { world_normal[3 * idx], world_normal[3 * idx + 1], world_normal[3 * idx + 2] };
+				float3 p_view = transformPoint4x3(p_world,view_mat);
+				float3 normal_view = transformVec4x3(normal_world,view_mat);
+				normal_view = {0.f,0.f,1.f};
+				float3 ray_view = {
+					(pixf.x - proj_param[2])/proj_param[0],
+					(pixf.y - proj_param[3])/proj_param[1],
+					1
+				};
+				//ray_view = normalize3(ray_view);
+				//float d_int = dot3(p_view,normal_view)/(dot3(ray_view,normal_view)+1e-9);
+				float d_int = p_view.z;
+				float3 p_int_view = {
+					ray_view.x*d_int,
+					ray_view.y*d_int,
+					ray_view.z*d_int,
+				};
 
+				float3 p_int_world = transformPoint4x3Inverse(p_int_view,view_mat);
+				float3 p_int_texture = transformPoint4x4_proj(p_int_world, texture_proj_mat);
+
+				int y_id = ndc2Pix(p_int_texture.y, H)+1;
+				int x_id = ndc2Pix(p_int_texture.x, W)+1;
+
+				// Eq. (3) from 3D Gaussian splatting paper.
+				
+				// float3 color = p_int_world;
+				// C[0] += (color.x*0.5+0.5) * alpha * T;
+				// C[1] += (color.y*0.5+0.5) * alpha * T;
+				// C[2] += (color.z*0.5+0.5) * alpha * T;
+				float3 color = {0.f,0.f,0.f};
+				if(y_id>=0 && y_id < H && x_id>=0 && x_id < W){
+					float target_depth = texture[3*W*H + (y_id*W + x_id)];
+					float actual_depth = p_int_texture.z;
+					float shadowmap_diff = target_depth - actual_depth;
+					float shadowmap_tol = 0.05;
+					float not_in_shadow = exp(-shadowmap_diff*shadowmap_diff/(shadowmap_tol*shadowmap_tol));
+
+					for (int ch = 0; ch < 3; ch++)
+						C[ch] += not_in_shadow * texture[ch*W*H + (y_id*W + x_id)] * alpha * T;
+					C[3] += not_in_shadow * alpha * T;
+				}
+			}
+			
+			// for (int ch = 0; ch < CHANNELS; ch++){
+			// 	float color = 0.f;
+			// 	if(y_id>=0 && y_id < H && x_id>=0 && x_id < W){
+			// 		color = texture[ch*W*H + (y_id*W + x_id)];
+			// 	}
+			// 	C[ch] += color * alpha * T;
+			// 	//C[ch] += (world_normal[collected_id[j] * CHANNELS + ch]*0.5f+0.5f) * alpha * T;
+			// }
 			T = test_T;
 
 			// Keep track of last range entry to update this
@@ -379,6 +444,12 @@ void FORWARD::render(
 	const uint32_t* point_list,
 	int W, int H,
 	const float2* means2D,
+	const float* world_normal,
+	const float* world_center,
+	const float* texture,
+	const float* texture_proj_mat,
+	const float* view_mat,
+	const float* proj_param,
 	const float* colors,
 	const float4* conic_opacity,
 	float* final_T,
@@ -391,6 +462,12 @@ void FORWARD::render(
 		point_list,
 		W, H,
 		means2D,
+		world_normal,
+		world_center,
+		texture,
+		texture_proj_mat,
+		view_mat,
+		proj_param,
 		colors,
 		conic_opacity,
 		final_T,
