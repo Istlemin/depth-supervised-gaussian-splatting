@@ -10,4 +10,4 @@ The codebase has the same prerequisites as the original repository, with the onl
 
 ## Reproducing Results
 
-The dataset used can be found at ... In order to reproduce the main results from the paper, simply run `experiments/evaluate_all.sh` and `experiments/train_texture_all.sh`. Then, running the notebook `notebooks/plot.ipynb` will produce the main plot comparing the performance of my techniques against the baseline. 
+The dataset used can be found at https://drive.google.com/file/d/1yISt0t4-Eyi1-yJXEXQN0CZvGOd6PBXb/view?usp=sharing. In order to reproduce the main results from the paper, simply run `experiments/evaluate_all.sh` and `experiments/train_texture_all.sh`. Then, running the notebook `notebooks/plot.ipynb` will produce the main plot comparing the performance of my techniques against the baseline. 
