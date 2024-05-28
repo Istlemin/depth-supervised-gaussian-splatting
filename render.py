@@ -26,10 +26,12 @@ import cv2
 import numpy as np
 
 from utils.image_utils import psnr
-from utils.loss_utils import gaussian
+from utils.loss_utils import gaussian, l2_loss
 
-def render_set(model_path, name, iteration, views,texture_views,gaussians, pipeline, background, blend_mode, render_type):
+def render_set(model_path, name, iteration, views,texture_views,gaussians, pipeline, background, blend_mode, render_type,ablations):
     approach = f"{render_type}_{blend_mode}_{iteration}_{len(texture_views)}"
+    if len(ablations)>0:
+        approach += "_"+"_".join(ablations)
     render_path = os.path.join(model_path, name, approach, "renders")
     gts_path = os.path.join(model_path, name, approach, "gt")
 
@@ -55,7 +57,7 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
         #texture_views = views[1:]
 
         if render_type == "texture":
-            rendering_pkg = textured_render_multicam(view, texture_views,gaussians, pipeline, background,in_training=(name=="train"),blend_mode=blend_mode)
+            rendering_pkg = textured_render_multicam(view, texture_views,gaussians, pipeline, background,in_training=(name=="train"),blend_mode=blend_mode,ablations=ablations)
             
             if args.inpaint:
                 render_textured = cv2.inpaint(
@@ -86,6 +88,14 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
             torchvision.utils.save_image(0.1*render(view, gaussians, pipeline, background,render_depth=True,depth_exp=1.0)["render_depth"], os.path.join(render_path, '{0:05d}'.format(idx) + "_depth1.0.png"))
             torchvision.utils.save_image(rendering_pkg["render_opacity"], os.path.join(render_path, '{0:05d}'.format(idx) + "_opacity.png"))
             psnrs.append(psnr(view.original_image, rendering_pkg["render_textured"]).mean().item())
+        elif render_type == "depth_not_normalized":
+            rendering_pkg = render(view, gaussians, pipeline, background,render_depth=True, normalize_depth=False)
+            rendering_pkg["render_depth"]
+            psnrs.append(l2_loss(view.depth, rendering_pkg["render_depth"].cpu()).mean().item())
+        elif render_type == "depth":
+            rendering_pkg = render(view, gaussians, pipeline, background,render_depth=True)
+            rendering_pkg["render_depth"]
+            psnrs.append(l2_loss(view.depth, rendering_pkg["render_depth"].cpu()).mean().item())
         else:
             rendering_pkg = render(view, gaussians, pipeline, background,render_depth=True)
             #torchvision.utils.save_image(0.1*render(view, gaussians, pipeline, background,render_depth=True,depth_exp=0.25)["render_depth"]**4, os.path.join(render_path, '{0:05d}'.format(idx) + "_depth0.5.png"))
@@ -103,7 +113,7 @@ def render_set(model_path, name, iteration, views,texture_views,gaussians, pipel
             torchvision.utils.save_image(view.depth*0.1, os.path.join(render_path, '{0:05d}'.format(idx) + "gtdepth.png"))
     print("Mean PSNR:",np.mean(psnrs))
     
-def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool,blend_mode, render_type, train_images):
+def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool,blend_mode, render_type, train_images, ablations):
     with torch.no_grad():
         gaussians = GaussianModel(dataset.sh_degree)
         scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
@@ -122,10 +132,10 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
         render_images = [render_images[i] for i in render_images_subset]
         
         if not skip_train:
-             render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(),render_images, gaussians, pipeline, background,blend_mode, render_type)
+             render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(),render_images, gaussians, pipeline, background,blend_mode, render_type,ablations)
 
         if not skip_test:
-             render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(),render_images, gaussians, pipeline, background, blend_mode,render_type)
+             render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(),render_images, gaussians, pipeline, background, blend_mode,render_type,ablations)
 
 if __name__ == "__main__":
     # Set up command line argument parser
@@ -133,18 +143,19 @@ if __name__ == "__main__":
     model = ModelParams(parser, sentinel=True)
     pipeline = PipelineParams(parser)
     parser.add_argument("--iteration", default=-1, type=int)
-    parser.add_argument("--blend_mode", default="alpha", type=str)
+    parser.add_argument("--blend_mode", default="scores", type=str)
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--mode", default="normal",type=str)
+    parser.add_argument("--ablations", nargs='+', default=[])
     parser.add_argument("--inpaint", action="store_true")
     parser.add_argument("--train_images", default=1000, type=int)
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
-
+    print(args.ablations)
     render_type = args.mode
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
-    render_sets(model.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, args.blend_mode, render_type, args.train_images)
+    render_sets(model.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, args.blend_mode, render_type, args.train_images,args.ablations)

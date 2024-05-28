@@ -46,7 +46,13 @@ def training(
     checkpoint,
     debug_from,
     init_gaussian_ply,
+    loss_version,
 ):
+    scales = 2
+    # if loss_version == 0:
+    #     loss_version = 6
+    #     if loss_version 
+    
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
@@ -116,14 +122,14 @@ def training(
             viewpoint_stack = scene.getTrainCameras().copy()
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
         
-        # # selected_cameras = []
+        # selected_cameras = []
         # for camera in scene.getTrainCameras():
         #     #print(camera.colmap_id)
         #     # if camera.colmap_id in [0,10]:
         #     #     selected_cameras.append(camera)
         #     if camera.colmap_id in [55]:
         #         viewpoint_cam = camera
-
+        
         # viewpoint_cam = selected_cameras[iteration%len(selected_cameras)]
         selected_cameras = scene.getTrainCameras()
         # print(viewpoint_cam.colmap_id)
@@ -140,11 +146,8 @@ def training(
                 start_time = time.time()
                 prerender_depth(selected_cameras, gaussians, pipe, bg)
                 #print("Took time ", time.time() - start_time)
-                
-            scale=(iteration+4)%5
-            #scale = 0
             
-            scale=(iteration+1)%2
+            scale=(iteration+scales-1)%scales
             
             render_pkg = textured_render_multicam(
                 viewpoint_cam,
@@ -154,7 +157,7 @@ def training(
                 background,
                 in_training=True,
                 texture_scale=scale,#(3-(iteration//600)),
-                blend_mode="alpha",#"scores_softmax"
+                blend_mode="scores_softmax2",#"scores_softmax"
                 num_texture_views=8
             )
             
@@ -184,24 +187,47 @@ def training(
             images = torch.nn.functional.interpolate(images, (gt_image_rz.shape[1],gt_image_rz.shape[2]), mode='area')
             masks = torch.nn.functional.interpolate(masks, (gt_image_rz.shape[1],gt_image_rz.shape[2]), mode='area')
             
+            mask = render_pkg["render_textured_mask"]
+            image = render_pkg["render_textured"]
+            
             gt_image_rz = gt_image_rz.unsqueeze(0)
-            loss = 0
-            # outside_loss = l2_loss((masks*images)*(gt_image==0), torch.zeros_like(masks))*1000
-            # loss += outside_loss
-            
-            #loss += l2_loss((masks.detach()*images)[:,:,:], (masks.detach()*gt_image_rz)[:,:,:])
-            loss += l2_loss(masks*torch.maximum(torch.zeros_like(images),(1-abs(images-gt_image_rz).detach()*10)),torch.ones_like(masks))
-            
-            #loss += l2_loss((images)[:,:,:], (gt_image_rz)[:,:,:])*1
-            
             gt_image = viewpoint_cam.image_scales[0]
-            Ll1 = l1_loss(render_pkg["render_textured"], gt_image)
             
-            # blend_loss = l2_loss((render_pkg["render_textured_mask"].detach()*render_pkg["render_textured"])[:,:,:], (render_pkg["render_textured_mask"].detach()*gt_image)[:,:,:])
-            # loss += blend_loss
-            #loss += l2_loss((images)[:,:,:], (gt_image)[:,:,:])*10
-            #loss += ((render_pkg["render_opacity"] - 1) ** 2).mean() * 100
-            #loss += l2_loss(masks,torch.ones_like(masks))*0.01
+            full_photo = l1_loss((image)[:,:,:], (gt_image)[:,:,:])
+                
+            if loss_version==0:
+                full_photo_per_cam = l1_loss((images)[:,:,:], (gt_image_rz)[:,:,:])
+                loss = full_photo_per_cam
+                
+            if loss_version==1:
+                masked_photo_per_cam = l1_loss((masks.detach()*images)[:,:,:], (masks.detach()*gt_image_rz)[:,:,:])
+                loss = masked_photo_per_cam
+    
+            if loss_version==2:
+                mask_loss_per_cam = l2_loss(masks*torch.maximum(torch.zeros_like(images),(1-abs(images-gt_image_rz).detach()*10)),torch.ones_like(masks))
+                loss = mask_loss_per_cam
+                
+            if loss_version==3:
+                masked_photo = l1_loss((mask.detach()*image)[:,:,:], (mask.detach()*gt_image)[:,:,:])
+                loss = masked_photo
+            
+            if loss_version==4:
+                loss = full_photo
+            
+            if loss_version==5:
+                mask_loss = l2_loss(mask*torch.maximum(torch.zeros_like(image),(1-abs(image-gt_image).detach()*10)),torch.ones_like(mask))
+                loss = mask_loss
+                
+            if loss_version==6:
+                mask_loss_per_cam = l2_loss(masks*torch.maximum(torch.zeros_like(images),(1-abs(images-gt_image_rz).detach()*10)),torch.ones_like(masks))
+                masked_photo = l1_loss((mask.detach()*image)[:,:,:], (mask.detach()*gt_image)[:,:,:])
+                loss = (mask_loss_per_cam + masked_photo)/2
+                
+            if loss_version==7:
+                loss = full_photo*0
+            
+            loss *= 2
+            Ll1 = full_photo
         else:
             render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
             image, viewspace_point_tensor, visibility_filter, radii = (
@@ -232,28 +258,28 @@ def training(
         # print(f"{Ll1.item():.5f} {Ll1_2.item():.5f} {gaussians.depth_scale.item():.5f}")
         loss.backward()
 
-        if iteration % (2*3*5) == 1:
+        if iteration % 50 == 1:
             if opt.textured_render:
-                torchvision.utils.save_image(render_pkg["texture_images"], "tmp/textured_imgs.png")
-                torchvision.utils.save_image(images, "tmp/imgs.png")
-                torchvision.utils.save_image(images*masks, "tmp/imgs_masked.png")
+                # torchvision.utils.save_image(render_pkg["texture_images"], "tmp/textured_imgs.png")
+                # torchvision.utils.save_image(images, "tmp/imgs.png")
+                # torchvision.utils.save_image(images*masks, "tmp/imgs_masked.png")
                 torchvision.utils.save_image(render_pkg["render_textured"], "tmp/img.png")
                 torchvision.utils.save_image(render_pkg["render_textured"]*render_pkg["render_textured_mask"], "tmp/img_masked.png")
-                torchvision.utils.save_image(masks.float(), "tmp/mask.png")
-                torchvision.utils.save_image((masks*images), "tmp/outside.png")
-                torchvision.utils.save_image(
-                    gt_image_rz.broadcast_to(images.shape)*masks, "tmp/gt_image_masked.png"
-                )
-                torchvision.utils.save_image(
-                    gt_image_rz.broadcast_to(images.shape), "tmp/gt_images.png"
-                )
+                # torchvision.utils.save_image(masks.float(), "tmp/mask.png")
+                # torchvision.utils.save_image((masks*images), "tmp/outside.png")
+                # torchvision.utils.save_image(
+                #     gt_image_rz.broadcast_to(images.shape)*masks, "tmp/gt_image_masked.png"
+                # )
+                # torchvision.utils.save_image(
+                #     gt_image_rz.broadcast_to(images.shape), "tmp/gt_images.png"
+                # )
                 torchvision.utils.save_image(
                     gt_image_rz, "tmp/gt_image.png"
                 )
                 torchvision.utils.save_image(
                     render_pkg["render_depth"].grad*10000+0.5, "tmp/depth_grad.png"
                 )
-                print(l2_loss((render_pkg["render_textured"])[:,:,:], (gt_image)[:,:,:])*5)#,outside_loss)
+                print(l1_loss((render_pkg["render_textured"])[:,:,:], (gt_image)[:,:,:])*5)#,outside_loss)
             else:
                 torchvision.utils.save_image(image, "tmp/img.png")
                 torchvision.utils.save_image(
@@ -506,17 +532,22 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default=None)
     parser.add_argument("--init_gaussian_ply", type=str, default=None)
+    parser.add_argument("--loss_version", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
 
     print("Optimizing " + args.model_path)
 
     # Initialize system state (RNG)
-    safe_state(args.quiet)
+    safe_state(args.quiet,args.seed)
 
     test_iterations = list(range(0, 100000, 1000))
-    save_iterations = list(range(0, 100000, 1000))
-
+    
+    if op.extract(args).textured_render:
+        save_iterations = list(range(0, 100000, 100))
+    else:
+        save_iterations = list(range(0, 100000, 1000))
     # Start GUI server, configure and run training
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
@@ -530,6 +561,7 @@ if __name__ == "__main__":
         args.start_checkpoint,
         args.debug_from,
         init_gaussian_ply=args.init_gaussian_ply,
+        loss_version=args.loss_version
     )
 
     # All done

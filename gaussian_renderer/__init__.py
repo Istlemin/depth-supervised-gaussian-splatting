@@ -16,7 +16,7 @@ from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 from utils.graphics_utils import fov2focal, geom_transform_points
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, render_depth=True, depth_exp=1.0, texture_camera=None):
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, render_depth=True, depth_exp=1.0, texture_camera=None, normalize_depth=True):
     """
     Render the scene. 
     
@@ -156,7 +156,9 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         render_depth = rendered_image[3:4]#*torch.exp(pc.depth_scale)
         render_opacity = rendered_image[4:]#*torch.exp(pc.depth_scale)
 
-        render_depth = render_depth/torch.clamp(render_opacity,0.05,10000)
+        if normalize_depth:
+            render_depth = render_depth/torch.clamp(render_opacity,0.05,10000)
+        
         render_depth = render_depth**(1/depth_exp)
 
         # render_depth.retain_grad()

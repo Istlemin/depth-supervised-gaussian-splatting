@@ -10,7 +10,7 @@ import torchvision
 from depth_images import camera_frustrum_points, depth_image_to_point_cloud
 from tqdm import tqdm
 
-def textured_render(render_points,viewpoint_camera, texture_camera, texture_scale, shadowmap_tol=0.05):
+def textured_render(render_points,viewpoint_camera, texture_camera, texture_scale, shadowmap_tol=0.05, score_mode="density"):
 
     #texture_coords = geom_transform_points(render_points, texture_camera.full_proj_transform)
     points_texture_camera = geom_transform_points(render_points, texture_camera.world_view_transform)
@@ -44,8 +44,12 @@ def textured_render(render_points,viewpoint_camera, texture_camera, texture_scal
     view_vec = viewpoint_camera.camera_center - render_points
 
     eps = 1e-4
-    pixel_camera_score = ((tex_vec / (tex_vec.norm(dim=1).unsqueeze(1)+eps)) * (view_vec / (view_vec.norm(dim=1).unsqueeze(1)+eps))).sum(dim=1)# / (tex_vec.norm(dim=1)+eps)
-    pixel_camera_score = pixel_camera_score*0+1/torch.norm(texture_camera.camera_center-viewpoint_camera.camera_center)
+    
+    pixel_camera_score = ((tex_vec / (tex_vec.norm(dim=1).unsqueeze(1)+eps)) * (view_vec / (view_vec.norm(dim=1).unsqueeze(1)+eps))).sum(dim=1) / (tex_vec.norm(dim=1)+eps)
+    
+    if score_mode=="distance":
+        pixel_camera_score = pixel_camera_score*0+1/(torch.norm(texture_camera.camera_center-viewpoint_camera.camera_center)+0.05)
+    #pixel_camera_score = 1/tex_vec.norm(dim=1)
     #pixel_camera_score = pixel_camera_score.reshape((1,viewpoint_camera.image_height,viewpoint_camera.image_width))
     # print((texture_color*not_in_shadow).sum().item())
     return texture_color, not_in_shadow, in_frame.float(), pixel_camera_score
@@ -108,7 +112,7 @@ def get_top_texture_cameras(viewpoint_camera, render_args, texture_cameras, num_
     
     return visible_texture_cameras
 
-def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianModel, pipe, bg_color : torch.Tensor,in_training=False, texture_scale=0, blend_mode=None,num_texture_views=100):
+def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianModel, pipe, bg_color : torch.Tensor,in_training=False, texture_scale=0, blend_mode="scores2",num_texture_views=100,ablations=[]):
     render_pkg_view = render(viewpoint_camera, pc, pipe, bg_color)
 
     render_textured = torch.zeros_like(viewpoint_camera.original_image)
@@ -138,9 +142,14 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
     texture_in_frame = []
     texture_scores = []
 
+    score_mode="density"
+    if blend_mode[-1:]=="2":
+        score_mode="distance"
+    blend_mode = blend_mode[:-1]
+
     for i,texture_camera in enumerate(visible_texture_cameras):
         #print(texture_camera.colmap_id, exclude_texture_idx)
-        curr_texture_colors, curr_texture_mask,curr_texture_in_frame,pixel_camera_score = textured_render(render_points,viewpoint_camera, texture_camera, texture_scale=texture_scale)
+        curr_texture_colors, curr_texture_mask,curr_texture_in_frame,pixel_camera_score = textured_render(render_points,viewpoint_camera, texture_camera, texture_scale=texture_scale,score_mode=score_mode)
 
         texture_colors.append(curr_texture_colors.reshape(3,viewpoint_camera.image_height,viewpoint_camera.image_width))
         texture_masks.append(curr_texture_mask.reshape(1,viewpoint_camera.image_height,viewpoint_camera.image_width))
@@ -153,8 +162,16 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
     texture_masks = torch.stack(texture_masks)
     texture_scores = torch.stack(texture_scores)
     texture_in_frame *= (render_pkg_view["render_opacity"]>0.1).unsqueeze(0)
+    
+    if "score" in ablations:
+        texture_scores = texture_scores*0+1
+        
     texture_masks *= texture_in_frame
-    texture_scores *= texture_masks
+    
+    if "visibility" not in ablations:
+        texture_scores *= texture_masks
+    else:
+        texture_scores *= texture_in_frame
     
     if blend_mode == "alpha":
         w = torch.zeros_like(texture_masks)
@@ -211,6 +228,12 @@ def textured_render_multicam(viewpoint_camera, texture_cameras, pc : GaussianMod
         render_textured, render_textured_mask = blur_inpaint(render_textured, render_textured_mask,10)
         render_textured, render_textured_mask = blur_inpaint(render_textured, render_textured_mask,100)
         #print((render_textured).sum().item())
+    
+    for camera in (visible_texture_cameras):
+        del camera.rendered_depth
+        del camera.rendered_depth_scales
+        del camera.proj_mat
+    torch.cuda.empty_cache()
     
     return {
         "before_blend": before_blend,

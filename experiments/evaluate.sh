@@ -20,16 +20,22 @@ iterations=(1000 2000 3000 4000 5000 7000 10000 13000 16000 20000 25000 30000 37
 
 
 
-num_images=(1 5 10 20 30 40 50 70 100);
-for iteration in ${num_images[@]};
-    do python render.py --eval --skip_train --model_path output/${modelname}_depth/ --iteration $2 --mode texture --train_images $iteration;
-done;
-
-for iteration in ${iterations[@]};
-    do python render.py --eval --skip_train --model_path output/${modelname}_depth/ --iteration $iteration --mode texture;
-done;
+# num_images=(1 5 10 20 30 40 50 70 100);
+# for iteration in ${num_images[@]};
+#     do python render.py --eval --skip_train --model_path output/${modelname}_depth/ --iteration $2 --mode texture --train_images $iteration;
+# done;
 
 # for iteration in ${iterations[@]};
-#     do python render.py --eval --skip_train --model_path output/${modelname}_depth/ --iteration $iteration --mode texture_per_gaussian;
+#     do python render.py --eval --skip_train --model_path output/${modelname}_depth/ --iteration $iteration --mode texture --blend_mode="scores";
 # done;
+# for iteration in ${iterations[@]};
+#     do python render.py --eval --skip_train --model_path output/${modelname}_depth/ --iteration $iteration --mode texture --blend_mode="scores2";
+# done;
+# for iteration in ${iterations[@]};
+#     do python render.py --eval --skip_train --model_path output/${modelname}_depth/ --iteration $iteration --mode texture --blend_mode="scores_softmax2";
+# done;
+
+python render.py --eval --skip_train --model_path output/${modelname}_depth/ --iteration $2 --mode texture --blend_mode="scores2" --ablations "score";
+python render.py --eval --skip_train --model_path output/${modelname}_depth/ --iteration $2 --mode texture --blend_mode="scores2" --ablations "visibility";
+
 python metrics.py --model_paths output/${modelname}_depth/

@@ -18,7 +18,7 @@ from utils.graphics_utils import getWorld2View2, getProjectionMatrix, fov2focal
 class Camera(nn.Module):
     def __init__(self, colmap_id, R, T, FoVx, FoVy, image,depth, gt_alpha_mask,
                  image_name, uid,
-                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda"
+                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cpu"
                  ):
         super(Camera, self).__init__()
 
@@ -52,8 +52,8 @@ class Camera(nn.Module):
         for _ in range(5):
             self.image_scales.append(torch.nn.functional.interpolate(self.image_scales[-1].unsqueeze(0),scale_factor=0.5,mode="area").squeeze())
             
-        self.learnable_image = torch.nn.Parameter(inverse_sigmoid(self.original_image).clone())
-        
+        #self.learnable_image = torch.nn.Parameter(inverse_sigmoid(self.original_image).clone())
+        self.learnable_image = None
         if gt_alpha_mask is not None:
             self.original_image *= gt_alpha_mask.to(self.data_device)
         else:
